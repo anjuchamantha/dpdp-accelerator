@@ -20,7 +20,9 @@ In the Console (`https://<host>:9443/console`):
 8. Go to the **Advanced** tab → enable **Skip login consent** and **Skip logout
    consent**. → Click **Update**.
 9. Go to the **User Attributes** tab → Search & add `http://wso2.org/claims/username` as a
-   mandatory requested claim → Click **Update**.
+mandatory requested claim → Enable **Assign alternate subject identifier** → 
+Select **username** as Subject Attribute → Click **Update**.
+   
 10. Go to the **Authorization** tab, authorize all three resources below,
 selecting **all scopes** for each and policy **RBAC**:
     - Consent Management V2 Consents API
