@@ -4,6 +4,12 @@ Complete this after installing the accelerator and starting the Identity
 Server — see [`setup-guide.md`](setup-guide.md) if you haven't done that yet.
 This is the last step before the portal is ready to use.
 
+The steps below configure the portal for the super tenant. To serve other
+tenants at `/t/<tenant>/consent-portal/`, additionally follow
+[Multi-tenant deployment](#multi-tenant-deployment) — the same steps repeated
+inside each tenant, with the credentials stored through an API instead of the
+properties file.
+
 ## 1. Register & configure the OAuth application
 
 In the Console (`https://<host>:9443/console`):
@@ -56,3 +62,56 @@ oauth.client.secret=<Client Secret>
 ## 4. Restart
 
 Restart the Identity Server, then open `https://<host>:9443/consent-portal/`.
+
+## Multi-tenant deployment
+
+The portal serves every tenant from the same deployment, at
+`https://<host>:9443/t/<tenant>/consent-portal/` — enabled by the
+`[tenant_context.rewrite] custom_webapps` entry the accelerator ships in
+`deployment.toml`. Consents, catalog data, roles and sessions are all
+partitioned per tenant by the Identity Server.
+
+Each tenant that uses the portal needs its own application registration and
+credentials. For each tenant (created under **Tenants** in the super-tenant
+Console):
+
+1. **Register the OAuth application** in that tenant's Console
+   (`https://<host>:9443/t/<tenant>/console`), following the same steps as
+   [step 1](#1-register--configure-the-oauth-application) with one
+   difference — the Authorized redirect URL is tenant-qualified:
+
+   ```
+   https://<host>:9443/t/<tenant>/consent-portal/auth/callback
+   ```
+
+2. **Create the two roles** in that tenant's Console, exactly as in
+   [step 2](#2-create-the-required-user-roles-for-the-consent-portal).
+
+3. **Store the client credentials** through the tenant's Configuration
+   Management API (as a tenant administrator):
+
+   ```sh
+   curl -k -u <tenant-admin>@<tenant> -X POST \
+     'https://<host>:9443/t/<tenant>/api/identity/config-mgt/v1.0/resource/dpdp-portal' \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "name": "oauth-app",
+       "attributes": [
+         { "key": "client_id", "value": "<Client ID>" },
+         { "key": "client_secret", "value": "<Client Secret>" }
+       ]
+     }'
+   ```
+
+   To rotate credentials later, repeat the call with `-X PUT`. The store is
+   tenant-partitioned: a tenant can only ever read or write its own entry.
+
+No restart is needed — the portal picks up new or changed credentials within
+two minutes. Open `https://<host>:9443/t/<tenant>/consent-portal/` and sign in
+as a user of that tenant.
+
+> **Note** — the super tenant can use the same mechanism instead of
+> `dpdp-portal.properties`: call the API without the `/t/<tenant>` prefix as
+> the super-tenant administrator. When both exist, the Configuration
+> Management entry wins; the properties file remains as the fallback so
+> existing installs keep working.

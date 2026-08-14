@@ -25,8 +25,8 @@ import org.wso2.dpdp.accelerator.portal.webapp.exception.TokenRequestException;
 import org.wso2.dpdp.accelerator.portal.webapp.service.OAuthService;
 import org.wso2.dpdp.accelerator.portal.webapp.util.CookieUtil;
 import org.wso2.dpdp.accelerator.portal.webapp.util.HttpUtil;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
 import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConstants;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.io.IOException;
 
@@ -49,7 +49,7 @@ public class AuthRefreshServlet extends HttpServlet {
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
 
-        PortalConfig config = PortalConfig.getInstance(getServletContext());
+        TenantPortalConfig config = TenantPortalConfig.forRequest(getServletContext());
         String part1 = request.getParameter("refresh_token");
         String part2 = CookieUtil.getCookieValue(request, PortalConstants.REFRESH_TOKEN_PART2_COOKIE);
         if (part1 == null || part1.isEmpty() || part2 == null || part2.isEmpty()) {
@@ -63,7 +63,7 @@ public class AuthRefreshServlet extends HttpServlet {
             tokens = OAuthService.getInstance().refreshTokens(config, part1 + part2);
         } catch (TokenRequestException e) {
             LOG.warn("Refresh token grant failed.", e);
-            CookieUtil.clearAllAuthCookies(response, config.getPortalBasePath(), config.isCookieSecure());
+            CookieUtil.clearAllAuthCookies(response, config.getPortalExternalPath(), config.isCookieSecure());
             HttpUtil.sendError(response, HttpServletResponse.SC_UNAUTHORIZED,
                     PortalConstants.ERROR_UNAUTHORIZED, "Session refresh failed.");
             return;

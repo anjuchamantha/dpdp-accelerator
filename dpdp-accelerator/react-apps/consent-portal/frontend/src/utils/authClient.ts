@@ -16,6 +16,8 @@
  * under the License.
  */
 
+import { runtimeBasePath } from './basePath'
+
 export type UserProfile = Record<string, unknown>
 
 interface LogoutResponse {
@@ -29,9 +31,13 @@ function envCookieName(key: string, fallback: string): string {
 }
 
 function apiURL(path: string): string {
-  const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+  // An absolute VITE_API_BASE_URL (cross-origin BFF, used in dev) wins; a
+  // path-only or empty value means the BFF serves this page, so the base is
+  // detected from the browser URL at runtime to stay tenant-qualified
+  // ("/t/<tenant>/consent-portal") when the page is served under a tenant.
+  const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+  const baseURL = /^https?:\/\//i.test(configured) ? configured : runtimeBasePath()
   const normalizedBase = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL
-  // Resolve same-origin bases such as "/consent-portal" to an absolute URL.
   return new URL(`${normalizedBase}${path}`, window.location.origin).toString()
 }
 

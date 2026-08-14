@@ -21,8 +21,8 @@ package org.wso2.dpdp.accelerator.portal.webapp.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.wso2.dpdp.accelerator.portal.webapp.exception.TokenRequestException;
 import org.wso2.dpdp.accelerator.portal.webapp.util.HttpUtil;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
 import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConstants;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.io.IOException;
 import java.net.URI;
@@ -86,7 +86,8 @@ public final class OAuthService {
         }
     }
 
-    public String buildAuthorizeUrl(PortalConfig config, String redirectUri, String state, String codeChallenge) {
+    public String buildAuthorizeUrl(TenantPortalConfig config, String redirectUri, String state,
+                                    String codeChallenge) {
 
         Map<String, String> params = new LinkedHashMap<>();
         params.put("response_type", "code");
@@ -96,20 +97,20 @@ public final class OAuthService {
         params.put("state", state);
         params.put("code_challenge", codeChallenge);
         params.put("code_challenge_method", "S256");
-        return config.getIdentityServerBaseUrl() + "/oauth2/authorize?" + encodeForm(params);
+        return config.getExternalTenantBaseUrl() + "/oauth2/authorize?" + encodeForm(params);
     }
 
-    public String buildLogoutUrl(PortalConfig config, String idToken, String postLogoutRedirectUri) {
+    public String buildLogoutUrl(TenantPortalConfig config, String idToken, String postLogoutRedirectUri) {
 
         Map<String, String> params = new LinkedHashMap<>();
         if (idToken != null && !idToken.isEmpty()) {
             params.put("id_token_hint", idToken);
         }
         params.put("post_logout_redirect_uri", postLogoutRedirectUri);
-        return config.getIdentityServerBaseUrl() + "/oidc/logout?" + encodeForm(params);
+        return config.getExternalTenantBaseUrl() + "/oidc/logout?" + encodeForm(params);
     }
 
-    public JsonNode exchangeAuthorizationCode(PortalConfig config, String code, String redirectUri,
+    public JsonNode exchangeAuthorizationCode(TenantPortalConfig config, String code, String redirectUri,
                                               String codeVerifier) throws TokenRequestException {
 
         Map<String, String> params = new LinkedHashMap<>();
@@ -120,7 +121,7 @@ public final class OAuthService {
         return sendTokenRequest(config, params);
     }
 
-    public JsonNode refreshTokens(PortalConfig config, String refreshToken) throws TokenRequestException {
+    public JsonNode refreshTokens(TenantPortalConfig config, String refreshToken) throws TokenRequestException {
 
         Map<String, String> params = new LinkedHashMap<>();
         params.put("grant_type", "refresh_token");
@@ -128,14 +129,19 @@ public final class OAuthService {
         return sendTokenRequest(config, params);
     }
 
-    private JsonNode sendTokenRequest(PortalConfig config, Map<String, String> params)
+    private JsonNode sendTokenRequest(TenantPortalConfig config, Map<String, String> params)
             throws TokenRequestException {
 
+        if (!config.isConfigured()) {
+            throw new TokenRequestException("The consent portal has no OAuth client credentials for tenant "
+                    + config.getTenantDomain() + ".");
+        }
         String clientCredentials = config.getClientId() + ":" + config.getClientSecret();
         String basicAuth = Base64.getEncoder().encodeToString(clientCredentials.getBytes(StandardCharsets.UTF_8));
 
+        // The tenant-qualified token endpoint issues tokens in that tenant.
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getIdentityServerInternalBaseUrl() + "/oauth2/token"))
+                .uri(URI.create(config.getInternalTenantBaseUrl() + "/oauth2/token"))
                 .timeout(Duration.ofSeconds(30))
                 .header("Authorization", "Basic " + basicAuth)
                 .header("Content-Type", PortalConstants.CONTENT_TYPE_FORM)

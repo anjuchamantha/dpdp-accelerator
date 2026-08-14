@@ -30,61 +30,79 @@ import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 import org.wso2.dpdp.accelerator.portal.webapp.exception.TokenValidationException;
 import org.wso2.dpdp.accelerator.portal.webapp.model.AuthenticatedUser;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Validates Identity Server JWT access tokens against the server's JWKS
- * endpoint and extracts the authenticated principal.
+ * Validates Identity Server JWT access tokens against the issuing tenant's
+ * JWKS endpoint and extracts the authenticated principal. Each tenant signs
+ * with its own key, so one JWT processor (with its remote JWKS cache) is kept
+ * per tenant.
  */
 public final class TokenValidator {
 
+    private static final Map<String, ConfigurableJWTProcessor<SecurityContext>> PROCESSORS =
+            new ConcurrentHashMap<>();
     private static volatile TokenValidator instance;
 
-    private final ConfigurableJWTProcessor<SecurityContext> jwtProcessor;
-    private final String orgIdClaim;
-
-    private TokenValidator(PortalConfig config) throws MalformedURLException {
-
-        URL jwksUrl = new URL(config.getIdentityServerInternalBaseUrl() + "/oauth2/jwks");
-        JWKSource<SecurityContext> keySource = new RemoteJWKSet<>(jwksUrl);
-        orgIdClaim = config.getOrgIdClaim();
-        jwtProcessor = new DefaultJWTProcessor<>();
-        // The Identity Server issues RFC 9068 access tokens typed "at+jwt"; the
-        // Nimbus default accepts only "JWT" or an absent type.
-        jwtProcessor.setJWSTypeVerifier(new DefaultJOSEObjectTypeVerifier<>(
-                new JOSEObjectType("at+jwt"), JOSEObjectType.JWT, null));
-        jwtProcessor.setJWSKeySelector(new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, keySource));
+    private TokenValidator() {
     }
 
-    public static TokenValidator getInstance(PortalConfig config) throws TokenValidationException {
+    public static TokenValidator getInstance() {
 
         if (instance == null) {
             synchronized (TokenValidator.class) {
                 if (instance == null) {
-                    try {
-                        instance = new TokenValidator(config);
-                    } catch (MalformedURLException e) {
-                        throw new TokenValidationException("Invalid JWKS URL", e);
-                    }
+                    instance = new TokenValidator();
                 }
             }
         }
         return instance;
     }
 
+    private static ConfigurableJWTProcessor<SecurityContext> processorFor(TenantPortalConfig config)
+            throws TokenValidationException {
+
+        ConfigurableJWTProcessor<SecurityContext> processor = PROCESSORS.get(config.getTenantDomain());
+        if (processor != null) {
+            return processor;
+        }
+        try {
+            // The tenant-qualified JWKS endpoint serves that tenant's keys.
+            URL jwksUrl = new URL(config.getInternalTenantBaseUrl() + "/oauth2/jwks");
+            JWKSource<SecurityContext> keySource = new RemoteJWKSet<>(jwksUrl);
+            ConfigurableJWTProcessor<SecurityContext> created = new DefaultJWTProcessor<>();
+            // The Identity Server issues RFC 9068 access tokens typed "at+jwt";
+            // the Nimbus default accepts only "JWT" or an absent type.
+            created.setJWSTypeVerifier(new DefaultJOSEObjectTypeVerifier<>(
+                    new JOSEObjectType("at+jwt"), JOSEObjectType.JWT, null));
+            created.setJWSKeySelector(new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, keySource));
+            ConfigurableJWTProcessor<SecurityContext> raced =
+                    PROCESSORS.putIfAbsent(config.getTenantDomain(), created);
+            return raced != null ? raced : created;
+        } catch (MalformedURLException e) {
+            throw new TokenValidationException("Invalid JWKS URL", e);
+        }
+    }
+
     /**
-     * Verifies signature and expiry, and returns the principal carried by the token.
+     * Verifies signature and expiry against the tenant's keys, and returns the
+     * principal carried by the token.
      */
-    public AuthenticatedUser validate(String accessToken) throws TokenValidationException {
+    public AuthenticatedUser validate(TenantPortalConfig config, String accessToken)
+            throws TokenValidationException {
 
         JWTClaimsSet claims;
         try {
-            claims = jwtProcessor.process(accessToken, null);
+            claims = processorFor(config).process(accessToken, null);
+        } catch (TokenValidationException e) {
+            throw e;
         } catch (Exception e) {
             throw new TokenValidationException("Access token validation failed", e);
         }
@@ -94,7 +112,7 @@ public final class TokenValidator {
             throw new TokenValidationException("Access token has no subject");
         }
 
-        String orgId = stringClaim(claims, orgIdClaim);
+        String orgId = stringClaim(claims, config.getOrgIdClaim());
         String scope = stringClaim(claims, "scope");
         List<String> scopes = scope == null ? List.of() : Arrays.asList(scope.split("\\s+"));
         return new AuthenticatedUser(subject, orgId, scopes);

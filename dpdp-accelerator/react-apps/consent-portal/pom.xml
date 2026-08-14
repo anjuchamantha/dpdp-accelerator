@@ -47,6 +47,24 @@
             <artifactId>commons-logging</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!--
+          Carbon runtime APIs, provided by the Identity Server's Carbon webapp
+          classloading environment at runtime: the tenant of the request comes
+          from PrivilegedCarbonContext (set by the TenantContextRewriteValve)
+          and per-tenant portal credentials are read through the
+          ConfigurationManager OSGi service. Compile-time versions track what
+          is publicly published; the server supplies its own newer bundles.
+        -->
+        <dependency>
+            <groupId>org.wso2.carbon</groupId>
+            <artifactId>org.wso2.carbon.utils</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.identity.framework</groupId>
+            <artifactId>org.wso2.carbon.identity.configuration.mgt.core</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>

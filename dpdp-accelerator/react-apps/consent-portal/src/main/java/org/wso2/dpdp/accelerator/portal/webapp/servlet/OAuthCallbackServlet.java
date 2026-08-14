@@ -24,8 +24,8 @@ import org.apache.commons.logging.LogFactory;
 import org.wso2.dpdp.accelerator.portal.webapp.exception.TokenRequestException;
 import org.wso2.dpdp.accelerator.portal.webapp.service.OAuthService;
 import org.wso2.dpdp.accelerator.portal.webapp.util.CookieUtil;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
 import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConstants;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,13 +51,13 @@ public class OAuthCallbackServlet extends HttpServlet {
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
 
-        PortalConfig config = PortalConfig.getInstance(getServletContext());
-        String portalHome = config.getPortalBasePath() + "/";
+        TenantPortalConfig config = TenantPortalConfig.forRequest(getServletContext());
+        String portalHome = config.getPortalExternalPath() + "/";
         String code = request.getParameter("code");
 
         if (code == null || code.isEmpty()) {
             // Post-logout redirect (or an authorize error such as access_denied).
-            CookieUtil.clearAllAuthCookies(response, config.getPortalBasePath(), config.isCookieSecure());
+            CookieUtil.clearAllAuthCookies(response, config.getPortalExternalPath(), config.isCookieSecure());
             response.sendRedirect(portalHome);
             return;
         }
@@ -73,14 +73,14 @@ public class OAuthCallbackServlet extends HttpServlet {
             }
         }
         CookieUtil.clearCookie(response, PortalConstants.AUTH_TRANSACTION_COOKIE,
-                config.getPortalBasePath() + "/auth", config.isCookieSecure());
+                config.getPortalExternalPath() + "/auth", config.isCookieSecure());
         if (codeVerifier == null) {
             LOG.warn("OAuth callback rejected: state mismatch or missing login transaction.");
             response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid login transaction.");
             return;
         }
 
-        String redirectUri = config.getIdentityServerBaseUrl() + config.getPortalBasePath() + "/auth/callback";
+        String redirectUri = config.getPortalExternalUrl() + "/auth/callback";
         JsonNode tokens;
         try {
             tokens = OAuthService.getInstance()
@@ -95,9 +95,9 @@ public class OAuthCallbackServlet extends HttpServlet {
         response.sendRedirect(portalHome);
     }
 
-    static void issueTokenCookies(HttpServletResponse response, PortalConfig config, JsonNode tokens) {
+    static void issueTokenCookies(HttpServletResponse response, TenantPortalConfig config, JsonNode tokens) {
 
-        String path = config.getPortalBasePath();
+        String path = config.getPortalExternalPath();
         boolean secure = config.isCookieSecure();
         int accessTokenMaxAge = tokens.path("expires_in").asInt(3600);
 

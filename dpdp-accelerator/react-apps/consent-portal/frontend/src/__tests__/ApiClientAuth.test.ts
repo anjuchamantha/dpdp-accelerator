@@ -165,12 +165,17 @@ describe('authenticated API client', () => {
     })
   })
 
-  it('treats an empty API base URL as same-origin', async () => {
+  it('resolves a non-absolute API base URL from the browser location', async () => {
+    // Anything but an absolute http(s) base means the BFF serves the SPA, so
+    // the base comes from the page URL at runtime (tenant-aware).
     vi.stubEnv('VITE_API_BASE_URL', '')
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}))
     vi.stubGlobal('fetch', fetchMock)
 
     await apiRequest('/consents')
-    expect(fetchMock).toHaveBeenCalledWith(`${window.location.origin}/consents`, expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${window.location.origin}/consent-portal/consents`,
+      expect.anything(),
+    )
   })
 })

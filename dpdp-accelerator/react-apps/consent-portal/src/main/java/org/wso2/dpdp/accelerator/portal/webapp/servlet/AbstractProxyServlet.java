@@ -22,8 +22,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.wso2.dpdp.accelerator.portal.webapp.client.IdentityServerClient;
 import org.wso2.dpdp.accelerator.portal.webapp.util.AuthUtil;
 import org.wso2.dpdp.accelerator.portal.webapp.util.HttpUtil;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
 import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConstants;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -60,7 +60,7 @@ public abstract class AbstractProxyServlet extends HttpServlet {
                     PortalConstants.ERROR_UNAUTHORIZED, "Authentication is required.");
             return null;
         }
-        return new IdentityServerClient(PortalConfig.getInstance(getServletContext()), accessToken);
+        return new IdentityServerClient(TenantPortalConfig.forRequest(getServletContext()), accessToken);
     }
 
     protected static String readBody(HttpServletRequest request) throws IOException {

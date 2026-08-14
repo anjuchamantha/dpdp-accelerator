@@ -25,6 +25,7 @@ import { OxygenUIThemeProvider, AcrylicOrangeTheme, CssBaseline } from '@wso2/ox
 import App from './App'
 import i18n from './i18n/i18n'
 import queryClient from './utils/queryClient'
+import { runtimeBasePath } from './utils/basePath'
 
 const rootElement = document.getElementById('root')
 
@@ -38,7 +39,9 @@ createRoot(rootElement).render(
       <CssBaseline />
       <I18nextProvider i18n={i18n}>
         <QueryClientProvider client={queryClient}>
-          <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+          {/* The basename is detected at runtime: the Identity Server serves
+              the portal both at /consent-portal and /t/<tenant>/consent-portal. */}
+          <BrowserRouter basename={runtimeBasePath()}>
             <App />
           </BrowserRouter>
         </QueryClientProvider>

@@ -19,8 +19,8 @@
 package org.wso2.dpdp.accelerator.portal.webapp.client;
 
 import org.wso2.dpdp.accelerator.portal.webapp.service.OAuthService;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
 import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConstants;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.io.IOException;
 import java.net.URI;
@@ -41,10 +41,10 @@ public class IdentityServerClient {
     /** Base path of the consent management v2 (administrative) API. */
     public static final String CONSENT_MGT_V2_API = "/api/identity/consent-mgt/v2.0";
 
-    private final PortalConfig config;
+    private final TenantPortalConfig config;
     private final String accessToken;
 
-    public IdentityServerClient(PortalConfig config, String accessToken) {
+    public IdentityServerClient(TenantPortalConfig config, String accessToken) {
 
         this.config = config;
         this.accessToken = accessToken;
@@ -82,8 +82,9 @@ public class IdentityServerClient {
 
     private HttpRequest.Builder request(String path) {
 
+        // Tenant-qualified so the consent APIs operate on the request's tenant.
         return HttpRequest.newBuilder()
-                .uri(URI.create(config.getIdentityServerInternalBaseUrl() + path))
+                .uri(URI.create(config.getInternalTenantBaseUrl() + path))
                 .timeout(Duration.ofSeconds(30))
                 .header("Authorization", "Bearer " + accessToken)
                 .header("Accept", PortalConstants.CONTENT_TYPE_JSON);

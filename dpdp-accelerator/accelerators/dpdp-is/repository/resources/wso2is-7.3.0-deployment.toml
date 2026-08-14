@@ -114,3 +114,12 @@ read = ["internal_flow_view", "internal_governance_view", "internal_consent_mgt_
 context = "(.*)/consent-portal(.*)"
 secure = "false"
 http_method = "all"
+
+# Serves the consent portal tenant-qualified, the same way the server treats
+# the My Account and Console apps: the TenantContextRewriteValve resolves
+# /t/<tenant>/consent-portal/... to the deployed /consent-portal webapp with
+# that tenant set as the request's tenant context. The super tenant keeps the
+# unqualified /consent-portal path (tenanted /t/carbon.super URLs are rejected
+# by the server unless require_super_tenant_in_urls is enabled).
+[tenant_context.rewrite]
+custom_webapps = ["/consent-portal/"]

@@ -42,6 +42,7 @@ public final class PortalConstants {
     public static final String ERROR_FORBIDDEN = "FORBIDDEN";
     public static final String ERROR_BAD_REQUEST = "BAD_REQUEST";
     public static final String ERROR_UPSTREAM = "UPSTREAM_ERROR";
+    public static final String ERROR_NOT_CONFIGURED = "NOT_CONFIGURED";
 
     public static final String CONTENT_TYPE_JSON = "application/json";
     public static final String CONTENT_TYPE_FORM = "application/x-www-form-urlencoded";

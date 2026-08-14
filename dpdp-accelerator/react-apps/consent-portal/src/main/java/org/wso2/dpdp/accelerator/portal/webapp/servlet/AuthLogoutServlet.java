@@ -23,7 +23,7 @@ import org.wso2.dpdp.accelerator.portal.webapp.service.OAuthService;
 import org.wso2.dpdp.accelerator.portal.webapp.util.AuthUtil;
 import org.wso2.dpdp.accelerator.portal.webapp.util.CookieUtil;
 import org.wso2.dpdp.accelerator.portal.webapp.util.HttpUtil;
-import org.wso2.dpdp.accelerator.portal.webapp.util.PortalConfig;
+import org.wso2.dpdp.accelerator.portal.webapp.util.TenantPortalConfig;
 
 import java.io.IOException;
 
@@ -44,12 +44,11 @@ public class AuthLogoutServlet extends HttpServlet {
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
 
-        PortalConfig config = PortalConfig.getInstance(getServletContext());
+        TenantPortalConfig config = TenantPortalConfig.forRequest(getServletContext());
         String idToken = AuthUtil.resolveIdToken(request);
-        String postLogoutRedirectUri =
-                config.getIdentityServerBaseUrl() + config.getPortalBasePath() + "/auth/callback";
+        String postLogoutRedirectUri = config.getPortalExternalUrl() + "/auth/callback";
 
-        CookieUtil.clearAllAuthCookies(response, config.getPortalBasePath(), config.isCookieSecure());
+        CookieUtil.clearAllAuthCookies(response, config.getPortalExternalPath(), config.isCookieSecure());
 
         ObjectNode body = HttpUtil.mapper().createObjectNode();
         body.put("logoutUrl", OAuthService.getInstance()

@@ -146,4 +146,27 @@
         <Bug pattern="RCN_REDUNDANT_NULLCHECK_OF_NULL_VALUE"/>
     </Match>
 
+    <!--
+      The only variable data logged is the tenant domain, which is not raw
+      request input: the TenantContextRewriteValve resolves it against the
+      tenant registry before this webapp runs, and TenantContext additionally
+      asserts it is host-name-shaped ([A-Za-z0-9._-]+) before use.
+    -->
+    <Match>
+        <Class name="org.wso2.dpdp.accelerator.portal.webapp.service.TenantAppConfigResolver"/>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+    </Match>
+
+    <!--
+      The redirect targets are built from the servlet context path plus the
+      tenant path segment. The tenant domain is registry-validated by the
+      TenantContextRewriteValve and shape-asserted in TenantContext (see
+      above), and the result is a relative path, so it cannot name a foreign
+      host.
+    -->
+    <Match>
+        <Class name="org.wso2.dpdp.accelerator.portal.webapp.servlet.OAuthCallbackServlet"/>
+        <Bug pattern="UNVALIDATED_REDIRECT"/>
+    </Match>
+
 </FindBugsFilter>

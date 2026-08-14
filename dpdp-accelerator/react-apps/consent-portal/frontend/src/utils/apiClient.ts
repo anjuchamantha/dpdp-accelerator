@@ -17,6 +17,7 @@
  */
 
 import { getAccessTokenPart1, isAuthEnabled, login, refreshSession } from './authClient'
+import { runtimeBasePath } from './basePath'
 
 export interface APIErrorPayload {
   code?: string
@@ -56,13 +57,21 @@ function buildHeaders(headers?: HeadersInit): Headers {
 }
 
 /**
- * Builds an absolute request URL from the configured API base URL and query params.
+ * Builds an absolute request URL from the API base URL and query params.
  *
- * The base URL may be absolute (cross-origin BFF) or a same-origin path such as
- * "/consent-portal" when the portal is served from the same webapp as the BFF.
+ * An absolute VITE_API_BASE_URL (cross-origin BFF, used in dev) wins; a
+ * path-only or empty value means the BFF is the webapp serving this page, so
+ * the base is detected from the browser URL at runtime — that keeps requests
+ * tenant-qualified ("/t/<tenant>/consent-portal/...") when the Identity
+ * Server serves the portal under a tenant path.
  */
+function resolveBaseURL(): string {
+  const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+  return /^https?:\/\//i.test(configured) ? configured : runtimeBasePath()
+}
+
 function buildURL(path: string, query?: RequestOptions['query']): string {
-  const baseURL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+  const baseURL = resolveBaseURL()
 
   if (/^https?:\/\//i.test(path)) {
     throw new Error(`apiClient path must be relative, received: "${path}"`)
