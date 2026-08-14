@@ -21,6 +21,7 @@ package org.wso2.dpdp.accelerator.portal.webapp.util;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -44,7 +45,19 @@ public final class TenantContext {
     private TenantContext() {
     }
 
-    /** Tenant domain of the current request; never null. */
+    /**
+     * Tenant domain of the current request; never null.
+     *
+     * The rewrite valve resolves a tenant path segment against the tenant
+     * registry case-insensitively but forwards the literal case from the URL,
+     * so {@code /t/WSO2.COM/...} and {@code /t/wso2.com/...} both reach this
+     * webapp with the tenant set - but as different-cased strings. Since that
+     * value seeds every outbound tenant-qualified URL (including the OAuth
+     * redirect_uri), a case mismatch against the registered domain breaks
+     * login downstream at the OAuth layer with an opaque invalid_client
+     * error. Tenant domains are DNS-style and canonically lower-case in the
+     * registry, so the value is normalized here, once, before anything reads it.
+     */
     public static String tenantDomain() {
 
         String domain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
@@ -54,7 +67,7 @@ public final class TenantContext {
         if (!SAFE_TENANT_DOMAIN.matcher(domain).matches()) {
             throw new IllegalStateException("The Carbon context holds a malformed tenant domain.");
         }
-        return domain;
+        return domain.toLowerCase(Locale.ROOT);
     }
 
     /** Tenant id matching {@link #tenantDomain()}; the super tenant id when unresolved. */
