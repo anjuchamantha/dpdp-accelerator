@@ -40,6 +40,10 @@ function optional(name: string): string | undefined {
   return value && value.length > 0 ? value : undefined
 }
 
+function optionalWithDefault(name: string, fallback: string): string {
+  return optional(name) ?? fallback
+}
+
 function trimTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value
 }
@@ -90,6 +94,19 @@ export const env = {
     const password = optional('TEST_USER_2_PASSWORD')
     return username && password ? { username, password } : undefined
   },
+
+  /**
+   * The super-tenant admin - defaults to admin/admin, matching both
+   * scripts/provision-test-users.sh's own default and the accelerator's own configure.properties
+   * default for a fresh install. Only used by tests/05-multi-tenancy, to create a throwaway
+   * tenant through the Console's "New Root Organization" flow - see fixtures/tenant.fixtures.ts.
+   * Not required in .env: unlike TEST_USER_USERNAME/TEST_CONSENT_ADMIN_USERNAME, a wrong default
+   * here just makes that one test area fail its own login, not silently corrupt other tests.
+   */
+  superAdmin: {
+    username: optionalWithDefault('IS_ADMIN_USERNAME', 'admin'),
+    password: optionalWithDefault('IS_ADMIN_PASSWORD', 'admin'),
+  } satisfies Persona,
 }
 
 // The portal has no backend of its own any more (see docs/configuration-guide.md) - the frontend
@@ -97,22 +114,42 @@ export const env = {
 // consents live under the User Consent Management API (org.wso2.carbon.identity.rest.api.user.consent.v1,
 // unversioned base); admin consents/purposes/elements live under consent-mgt v2
 // (org.wso2.carbon.identity.api.server.consent.management.v2, see clients/ConsentApiClient.ts for the
-// full contract). Both are super-tenant paths - a non-default tenant would need a `/t/<tenant>` prefix,
-// which this suite doesn't currently support.
-export function myConsentsApiUrl(path: string): string {
-  return `${env.identityServerBaseUrl}/api/users/v1/me/consents${path}`
+// full contract). `tenantDomain` prefixes `/t/<tenant>` - confirmed live (see
+// fixtures/tenant.fixtures.ts) that a real OAuth2 bearer token reaches both surfaces fine
+// tenant-qualified; omit it (or pass undefined) for the super-tenant paths every other test uses.
+function tenantSegment(tenantDomain?: string): string {
+  return tenantDomain ? `/t/${tenantDomain}` : ''
 }
 
-export function adminConsentsApiUrl(path: string): string {
-  return `${env.identityServerBaseUrl}/api/identity/consent-mgt/v2.0/consents${path}`
+export function myConsentsApiUrl(path: string, tenantDomain?: string): string {
+  return `${env.identityServerBaseUrl}${tenantSegment(tenantDomain)}/api/users/v1/me/consents${path}`
 }
 
-export function consentPurposesApiUrl(path: string): string {
-  return `${env.identityServerBaseUrl}/api/identity/consent-mgt/v2.0/purposes${path}`
+export function adminConsentsApiUrl(path: string, tenantDomain?: string): string {
+  return `${env.identityServerBaseUrl}${tenantSegment(tenantDomain)}/api/identity/consent-mgt/v2.0/consents${path}`
 }
 
-export function consentElementsApiUrl(path: string): string {
-  return `${env.identityServerBaseUrl}/api/identity/consent-mgt/v2.0/elements${path}`
+export function consentPurposesApiUrl(path: string, tenantDomain?: string): string {
+  return `${env.identityServerBaseUrl}${tenantSegment(tenantDomain)}/api/identity/consent-mgt/v2.0/purposes${path}`
+}
+
+export function consentElementsApiUrl(path: string, tenantDomain?: string): string {
+  return `${env.identityServerBaseUrl}${tenantSegment(tenantDomain)}/api/identity/consent-mgt/v2.0/elements${path}`
+}
+
+// Full navigation targets for tests/05-multi-tenancy - both are absolute URLs to a different app
+// than the portal (Console, not consent-portal), so page objects there use page.goto() with these
+// directly rather than the portal-relative baseURL every other page object relies on.
+export function consoleRootOrganizationsUrl(): string {
+  return `${env.identityServerBaseUrl}/t/carbon.super/console/root/organizations`
+}
+
+export function tenantConsoleUrl(tenantDomain: string): string {
+  return `${env.identityServerBaseUrl}/t/${tenantDomain}/console`
+}
+
+export function tenantPortalUrl(tenantDomain: string): string {
+  return `${env.identityServerBaseUrl}/t/${tenantDomain}/consent-portal`
 }
 
 export type PersonaName = 'user' | 'user-2' | 'consent-admin'

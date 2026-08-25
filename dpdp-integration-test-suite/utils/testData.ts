@@ -40,6 +40,14 @@ export function uniqueServiceId(): string {
   return uniqueMarker('service')
 }
 
+// Tenant domains are unique server-wide regardless of activation state, and there's no real
+// delete available (no `Tenant.TenantDelete` in carbon.xml) - so a fixed domain would make every
+// run after the first fail with a domain-already-exists conflict. A fresh one every run means
+// there's nothing to collide with, and nothing to clean up either.
+export function uniqueTenantDomain(): string {
+  return `${uniqueMarker('dpdp-e2e')}.com`
+}
+
 // Realistic-looking labels for tests/03-consents/ - picked per-call and stamped with
 // uniqueMarker so records made by this suite's disposable, per-test setup (created and torn down
 // via seedConsent) never collide with each other or with anything else left in this shared

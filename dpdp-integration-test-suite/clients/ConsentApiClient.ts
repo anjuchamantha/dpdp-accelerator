@@ -101,11 +101,16 @@ export interface MyConsentListParams {
  * whichever persona's captured auth state the caller passes in (see utils/authStorage.ts) - tests
  * that need to prove a user's token is rejected by the admin surface construct this client
  * with the user's headers and call an admin method directly.
+ *
+ * `tenantDomain`, when passed, prefixes every URL with `/t/<tenant>` - confirmed live that a real
+ * bearer token reaches both surfaces fine tenant-qualified (see fixtures/tenant.fixtures.ts).
+ * Omit it for the super-tenant every other caller of this class targets.
  */
 export class ConsentApiClient {
   constructor(
     private readonly request: APIRequestContext,
     private readonly auth: AuthHeaders,
+    private readonly tenantDomain?: string,
   ) {}
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -115,7 +120,7 @@ export class ConsentApiClient {
   // --------------------------------------------------------------------- self-service surface
 
   async listMyConsents(params: MyConsentListParams = {}): Promise<APIResponse> {
-    return this.request.get(myConsentsApiUrl(''), {
+    return this.request.get(myConsentsApiUrl('', this.tenantDomain), {
       headers: this.headers(),
       params: Object.fromEntries(
         Object.entries(params)
@@ -126,20 +131,20 @@ export class ConsentApiClient {
   }
 
   async getMyConsent(consentId: string): Promise<APIResponse> {
-    return this.request.get(myConsentsApiUrl(`/${consentId}`), { headers: this.headers() })
+    return this.request.get(myConsentsApiUrl(`/${consentId}`, this.tenantDomain), { headers: this.headers() })
   }
 
   /** A PENDING consent transitions to ACTIVE once every listed authorizer has APPROVED, or to
    * REJECTED as soon as any one of them REJECTs - see consent.yaml's authorize operation. */
   async authorizeMyConsent(consentId: string, state: 'APPROVED' | 'REJECTED'): Promise<APIResponse> {
-    return this.request.post(myConsentsApiUrl(`/${consentId}/authorize`), {
+    return this.request.post(myConsentsApiUrl(`/${consentId}/authorize`, this.tenantDomain), {
       headers: this.headers({ 'Content-Type': 'application/json' }),
       data: { state },
     })
   }
 
   async revokeMyConsent(consentId: string): Promise<APIResponse> {
-    return this.request.post(myConsentsApiUrl(`/${consentId}/revoke`), {
+    return this.request.post(myConsentsApiUrl(`/${consentId}/revoke`, this.tenantDomain), {
       headers: this.headers({ 'Content-Type': 'application/json' }),
       data: {},
     })
@@ -148,14 +153,14 @@ export class ConsentApiClient {
   // ---------------------------------------------------------------------------- admin surface
 
   async createPurpose(body: CreatePurposeBody): Promise<APIResponse> {
-    return this.request.post(consentPurposesApiUrl(''), {
+    return this.request.post(consentPurposesApiUrl('', this.tenantDomain), {
       headers: this.headers({ 'Content-Type': 'application/json' }),
       data: body,
     })
   }
 
   async createElement(body: CreateElementBody): Promise<APIResponse> {
-    return this.request.post(consentElementsApiUrl(''), {
+    return this.request.post(consentElementsApiUrl('', this.tenantDomain), {
       headers: this.headers({ 'Content-Type': 'application/json' }),
       data: body,
     })
@@ -163,7 +168,7 @@ export class ConsentApiClient {
 
   /** Exact match on `name` - elements have no other unique-ish field to search by. */
   async findElementByName(name: string): Promise<APIResponse> {
-    return this.request.get(consentElementsApiUrl(''), {
+    return this.request.get(consentElementsApiUrl('', this.tenantDomain), {
       headers: this.headers(),
       params: { filter: `name eq "${name}"`, limit: 1 },
     })
@@ -171,7 +176,7 @@ export class ConsentApiClient {
 
   /** Exact match on `name` - a purpose can have several versions but the name alone identifies it here. */
   async findPurposeByName(name: string): Promise<APIResponse> {
-    return this.request.get(consentPurposesApiUrl(''), {
+    return this.request.get(consentPurposesApiUrl('', this.tenantDomain), {
       headers: this.headers(),
       params: { filter: `name eq "${name}"`, limit: 1 },
     })
@@ -179,7 +184,7 @@ export class ConsentApiClient {
 
   /** WSO2 IS caps this at 100 regardless of the requested `limit` - page via `after` to see more. */
   async listElements(params: { limit?: number; after?: string } = {}): Promise<APIResponse> {
-    return this.request.get(consentElementsApiUrl(''), {
+    return this.request.get(consentElementsApiUrl('', this.tenantDomain), {
       headers: this.headers(),
       params: Object.fromEntries(
         Object.entries(params)
@@ -191,7 +196,7 @@ export class ConsentApiClient {
 
   /** Same 100-record server cap as listElements. */
   async listPurposes(params: { limit?: number; after?: string } = {}): Promise<APIResponse> {
-    return this.request.get(consentPurposesApiUrl(''), {
+    return this.request.get(consentPurposesApiUrl('', this.tenantDomain), {
       headers: this.headers(),
       params: Object.fromEntries(
         Object.entries(params)
@@ -203,23 +208,23 @@ export class ConsentApiClient {
 
   /** 409 when still referenced by a Purpose - callers sweeping in bulk should tolerate that. */
   async deleteElement(elementId: string): Promise<APIResponse> {
-    return this.request.delete(consentElementsApiUrl(`/${elementId}`), { headers: this.headers() })
+    return this.request.delete(consentElementsApiUrl(`/${elementId}`, this.tenantDomain), { headers: this.headers() })
   }
 
   /** 409 when still referenced by a Consent - callers sweeping in bulk should tolerate that. */
   async deletePurpose(purposeId: string): Promise<APIResponse> {
-    return this.request.delete(consentPurposesApiUrl(`/${purposeId}`), { headers: this.headers() })
+    return this.request.delete(consentPurposesApiUrl(`/${purposeId}`, this.tenantDomain), { headers: this.headers() })
   }
 
   async createConsent(body: CreateConsentBody): Promise<APIResponse> {
-    return this.request.post(adminConsentsApiUrl(''), {
+    return this.request.post(adminConsentsApiUrl('', this.tenantDomain), {
       headers: this.headers({ 'Content-Type': 'application/json' }),
       data: body,
     })
   }
 
   async listAdminConsents(params: AdminConsentListParams = {}): Promise<APIResponse> {
-    return this.request.get(adminConsentsApiUrl(''), {
+    return this.request.get(adminConsentsApiUrl('', this.tenantDomain), {
       headers: this.headers(),
       params: Object.fromEntries(
         Object.entries(params)
@@ -230,7 +235,7 @@ export class ConsentApiClient {
   }
 
   async revokeAdminConsent(consentId: string): Promise<APIResponse> {
-    return this.request.post(adminConsentsApiUrl(`/${consentId}/revoke`), {
+    return this.request.post(adminConsentsApiUrl(`/${consentId}/revoke`, this.tenantDomain), {
       headers: this.headers({ 'Content-Type': 'application/json' }),
       data: {},
     })

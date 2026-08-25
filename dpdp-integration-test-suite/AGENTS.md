@@ -38,10 +38,13 @@ across the whole suite, not as one broken spec. This has already happened once h
 | `pages/` | Page Objects — one class per screen or dialog; all locators live here, never in a spec |
 | `clients/ConsentApiClient.ts` | Typed wrapper over the IS consent REST APIs |
 | `fixtures/auth.fixtures.ts` | Personas, API-client fixtures, cleanup tracker. Re-exports `test`/`expect` |
+| `fixtures/tenant.fixtures.ts` | `tests/05-multi-tenancy/` only — see "Multi-tenancy" below |
 | `utils/` | Env/config, auth headers, unique test-data generators, MUI helpers |
 
 Import `test` and `expect` **from `../../fixtures/auth.fixtures`**, never from `@playwright/test`
-directly — the fixtures are only available on the extended `test`.
+directly — the fixtures are only available on the extended `test`. `tests/05-multi-tenancy/`
+imports from `../../fixtures/tenant.fixtures` instead, which itself extends `auth.fixtures`'s
+`test` (so `consentAdminConsentApi` etc. are still available there too).
 
 ### Test IDs are not directory numbers
 
@@ -93,6 +96,37 @@ test('...', async ({ browser, consentAdminConsentApi, consentCleanupTracker }) =
 
 To prove a scope boundary, construct `ConsentApiClient` yourself with the *wrong* persona's headers
 and call an admin method — that's the intended way to assert a user's token is rejected.
+
+## Multi-tenancy (`tests/05-multi-tenancy/`)
+
+```ts
+const page = await loginAsTenantOwner(browser, tenant)        // holds every internal_consent_mgt_* scope
+const page = await loginAsTenantConsentUser(browser, tenant)   // holds dpdp-consent-user (no permissions)
+```
+
+`tenant` (worker-scoped, from `fixtures/tenant.fixtures.ts`) creates one throwaway tenant per
+worker — a unique domain every run, an owner, and a second `dpdp-consent-user` account with its
+role already assigned — entirely by driving the real Console UI in a browser, the same way an
+actual admin would. There's no teardown call: a fresh domain every run means nothing to collide
+with, and there's no real tenant delete on this product without enabling a `carbon.xml` flag this
+accelerator doesn't set.
+
+**Do not add a `TenantScimClient` or call SCIM2 against a secondary tenant directly.** Confirmed
+live, repeatedly: Basic-auth and Bearer-token SCIM2 calls against `/t/<tenant>/scim2/...` both
+401 for any tenant other than `carbon.super`, regardless of whose credentials — a real IS 7.3.0
+product limitation (see the WSO2 IAM community discussion "Invalid tenant domain of user error
+when use scim2 API"), not something fixable from this codebase. The one thing that *does* work is
+driving the same operations through Console's own UI (its frontend authenticates its internal
+calls some other way a standalone `Authorization` header replay doesn't reproduce) — that's why
+tenant creation, second-user creation, and role assignment are all done via `ConsoleRootOrganizationWizard`,
+`ConsoleAddUserWizard`, and `ConsoleRoleAssignment` in `pages/`, never via a REST client. If you need
+a new tenant-side Console operation this suite doesn't have yet, add another page object in that
+style rather than reaching for SCIM2.
+
+Also note: tenant creation itself has no REST-API shortcut worth using either — `POST
+/api/server/v1/tenants`'s `owners[].password` field doesn't actually become usable for login until
+a separate follow-up call, while Console's own "New Root Organization" form's password field works
+immediately. `ConsoleRootOrganizationWizard` is the only tenant-creation path this suite uses.
 
 ## Non-negotiable rules for writing a test
 
