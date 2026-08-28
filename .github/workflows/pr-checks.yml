@@ -1,0 +1,387 @@
+# Build + end-to-end checks for the DPDP accelerator.
+#
+# These jobs run identically on PRs to main and dev, but as of this writing neither
+# branch has a ruleset marking them as required status checks (neither of us has admin
+# access to set one up) - so a red `e2e-required` currently only advises a reviewer not
+# to merge, it doesn't block Merge. Making it a hard block on either branch is a one-line
+# ruleset change for whoever gets admin access (Settings -> Rules -> Rulesets); nothing
+# here would need to change.
+#
+# Two triggers, deliberately split - E2E now needs WSO2 subscription credentials
+# (SOLUTIONS_BOT_EMAIL / SOLUTIONS_BOT_U2_PASSWORD) to apply U2 updates, and those
+# secrets are never exposed to a fork PR under plain `pull_request` (GitHub's own
+# security model, not something this workflow controls):
+#   - `pull_request`  -> `build` only. Runs for every PR, including forks. No secrets,
+#     read-only token. This is the fast "does it compile" signal.
+#   - `pull_request_target` -> `e2e`, gated behind the `Action/trigger-e2e` label. A
+#     maintainer applies the label only after reviewing the diff - that's what makes
+#     running untrusted PR code with real subscription credentials acceptable here.
+#     `reset-e2e-label-on-push` strips the label on every new commit, so a stale
+#     approval can never carry over to code nobody looked at.
+#
+# `workflow_dispatch` also runs `e2e` directly (no label needed - it's already a
+# manual, authenticated action) and is the only way to choose `is_source: master`
+# (building product-is from source) instead of the default `release` + U2 update path.
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main, dev]
+  pull_request_target:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      is_source:
+        description: Where to get the Identity Server pack from
+        type: choice
+        options: [release, master]
+        default: release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IS_VERSION: 7.3.0
+  ACCELERATOR_VERSION: 1.0.0-SNAPSHOT
+
+jobs:
+  build:
+    name: Build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Build
+        run: mvn -B clean install
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+  # Belongs to the pull_request_target trigger, same as `e2e` below - without this, a
+  # label applied to review commit A would silently keep authorizing E2E (with real
+  # secrets) against whatever code commit B/C/... later replace it with.
+  reset-e2e-label-on-push:
+    name: Reset E2E label on push
+    if: >
+      github.event_name == 'pull_request_target' &&
+      (github.event.action == 'synchronize' || github.event.action == 'reopened')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Remove stale Action/trigger-e2e label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          error_output=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/Action%2Ftrigger-e2e" \
+            -X DELETE 2>&1)
+          exit_code=$?
+          set -e
+          if [ $exit_code -ne 0 ] && ! echo "$error_output" | grep -qi "404\|not found"; then
+            echo "$error_output" >&2
+            exit $exit_code
+          fi
+
+  e2e:
+    name: E2E integration tests
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'Action/trigger-e2e')
+    runs-on: ubuntu-latest
+    # Generous enough to cover the rare, manually-chosen product-is master build
+    # (large multi-module reactor, even with tests/checks skipped) plus one
+    # provisioning restart. The default release+U2 path finishes in a fraction of this.
+    timeout-minutes: 110
+    env:
+      IS_BASE_URL: https://localhost:9443
+      IS_SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.is_source || 'release' }}
+    steps:
+      # pull_request_target checks out the TARGET branch by default, which would
+      # silently test the wrong code - explicitly pin to the PR's own head commit. A
+      # plain workflow_dispatch run has no pull_request context, so it falls back to
+      # whatever ref triggered it (actions/checkout's own default).
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # No artifact download from `build`: that job only runs under `pull_request`,
+      # which never fires in the same workflow run as `pull_request_target` or
+      # `workflow_dispatch` - there is nothing to download here, so this job builds
+      # the accelerator itself.
+      - name: Build the accelerator
+        run: mvn -B clean install
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+      # --- Obtaining the IS pack: two mutually exclusive paths ------------------
+
+      # A 420 MB asset. Keyed on version alone, which is correct because a published
+      # release asset is immutable - bumping IS_VERSION must be the only way it changes.
+      - name: Cache IS pack
+        id: is-cache
+        if: env.IS_SOURCE == 'release'
+        uses: actions/cache@v4
+        with:
+          path: ~/is-pack
+          key: wso2is-${{ env.IS_VERSION }}
+
+      - name: Download IS ${{ env.IS_VERSION }}
+        if: env.IS_SOURCE == 'release' && steps.is-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/is-pack && cd ~/is-pack
+          base="https://github.com/wso2/product-is/releases/download/v${IS_VERSION}"
+          curl -fL --retry 3 -o wso2is.zip    "${base}/wso2is-${IS_VERSION}.zip"
+          curl -fL --retry 3 -o wso2is.sha256 "${base}/wso2is-${IS_VERSION}.zip.sha256"
+          # Fail loudly on a truncated download rather than later, as a mystery
+          # startup error.
+          echo "$(cut -d' ' -f1 wso2is.sha256)  wso2is.zip" | sha256sum -c -
+
+      # Only relevant for the manually-dispatched master build; harmless dead weight
+      # otherwise since the step it guards never runs on the default path.
+      - name: Cache Maven repo for the product-is build
+        if: env.IS_SOURCE == 'master'
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: product-is-master-m2-${{ github.run_id }}
+          restore-keys: |
+            product-is-master-m2-
+
+      - name: Build IS from product-is master
+        if: env.IS_SOURCE == 'master'
+        run: |
+          git clone --depth 1 https://github.com/wso2/product-is.git /tmp/product-is
+          cd /tmp/product-is
+          mvn -B -ntp install \
+            -Dmaven.test.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip=true \
+            -Dpmd.skip=true -Drat.skip=true -Dlicense.skip=true \
+            -Dmaven.javadoc.skip=true -Djacoco.skip=true
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+      - name: Stage the built distribution zip
+        if: env.IS_SOURCE == 'master'
+        run: |
+          zip_path=$(find /tmp/product-is/modules/distribution/target -maxdepth 1 -name "wso2is-*.zip" | head -1)
+          if [ -z "${zip_path}" ]; then
+            echo "::error::No wso2is-*.zip under modules/distribution/target - did the module path change?"
+            exit 1
+          fi
+          mkdir -p ~/is-pack
+          cp "${zip_path}" ~/is-pack/wso2is.zip
+          echo "Built $(basename "${zip_path}")"
+
+      - name: Unpack IS
+        run: unzip -q ~/is-pack/wso2is.zip -d "${GITHUB_WORKSPACE}"
+
+      - name: Resolve IS_HOME
+        run: |
+          dir=$(find "${GITHUB_WORKSPACE}" -maxdepth 1 -type d -name "wso2is-*")
+          if [ -z "${dir}" ]; then
+            echo "::error::No wso2is-* directory found after unpacking"
+            exit 1
+          fi
+          echo "IS_HOME=${dir}" >> "$GITHUB_ENV"
+          echo "Resolved IS_HOME=${dir}"
+
+      # Unconditional on the default (release) path now - this is the whole point of
+      # gating the job behind pull_request_target + a label: without the U2 update, a
+      # vanilla GA pack lacks the consent-mgt v2 API resources this accelerator needs
+      # (see issue history). Never runs for the master path - a source build already
+      # carries whatever is newest.
+      - name: Apply WSO2 U2 updates
+        if: env.IS_SOURCE == 'release'
+        env:
+          WSO2_USERNAME: ${{ secrets.SOLUTIONS_BOT_EMAIL }}
+          WSO2_PASSWORD: ${{ secrets.SOLUTIONS_BOT_U2_PASSWORD }}
+        run: |
+          if [ -z "${WSO2_USERNAME}" ] || [ -z "${WSO2_PASSWORD}" ]; then
+            echo "::error::WSO2_USERNAME/WSO2_PASSWORD are empty - SOLUTIONS_BOT_EMAIL and" \
+                 "SOLUTIONS_BOT_U2_PASSWORD must be configured as repository secrets for the" \
+                 "default release+U2 path to work."
+            exit 1
+          fi
+          cd "$IS_HOME"
+          bash bin/update_tool_setup.sh
+          # One retry: the updater is network-flaky, which is why FSA retries it too.
+          bin/wso2update_linux -v --username "$WSO2_USERNAME" --password "$WSO2_PASSWORD" \
+            || bin/wso2update_linux -v --username "$WSO2_USERNAME" --password "$WSO2_PASSWORD"
+
+      - name: Apply the accelerator
+        run: |
+          zip_path=$(find dpdp-accelerator/accelerators/dpdp-is/target -maxdepth 1 -name "wso2-dpdp-is-accelerator-*.zip" | head -1)
+          if [ -z "${zip_path}" ]; then
+            echo "::error::No wso2-dpdp-is-accelerator-*.zip under dpdp-accelerator/accelerators/dpdp-is/target"
+            exit 1
+          fi
+          unzip -q "${zip_path}" -d "$IS_HOME"
+          cd "${IS_HOME}/wso2-dpdp-is-accelerator-${ACCELERATOR_VERSION}"
+          bash bin/merge.sh     "$IS_HOME"
+          bash bin/configure.sh "$IS_HOME"
+
+      - name: Start the Identity Server
+        run: |
+          "${IS_HOME}/bin/wso2server.sh" start
+          for i in $(seq 1 60); do
+            if curl -sk -o /dev/null -f "${IS_BASE_URL}/oauth2/jwks"; then
+              echo "Identity Server ready after ~$((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Identity Server did not become ready within 300s"
+          tail -200 "${IS_HOME}/repository/logs/wso2carbon.log"
+          exit 1
+
+      - name: Verify accelerator provisioning
+        run: |
+          roles_found() {
+            curl -sk -u admin:admin \
+              "${IS_BASE_URL}/scim2/v2/Roles?filter=displayName+eq+dpdp-consent-admin" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin).get("totalResults", 0))'
+          }
+          wait_for_is() {
+            for i in $(seq 1 60); do
+              curl -sk -o /dev/null -f "${IS_BASE_URL}/oauth2/jwks" && return 0
+              sleep 5
+            done
+            return 1
+          }
+
+          max_restarts=1
+          attempt=0
+          while [ "$(roles_found)" != "1" ]; do
+            if [ "${attempt}" -ge "${max_restarts}" ]; then
+              echo "::error::Accelerator did not provision dpdp-consent-admin for carbon.super after ${max_restarts} restarts"
+              grep -n "Error provisioning the DPDP Consent Portal" \
+                "${IS_HOME}/repository/logs/wso2carbon.log" || true
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "::warning::dpdp-consent-admin missing after startup; restart ${attempt}/${max_restarts}"
+            "${IS_HOME}/bin/wso2server.sh" restart
+            wait_for_is || { echo "::error::Identity Server did not come back up after restart ${attempt}"; exit 1; }
+          done
+
+          if [ "${attempt}" -gt 0 ]; then
+            echo "Provisioning verified after ${attempt} restart(s)."
+          else
+            echo "Provisioning verified."
+          fi
+
+      - name: Provision test users
+        id: users
+        run: |
+          # Ephemeral - thrown away with the runner - but masked so it cannot reach a log.
+          password="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9')Aa1!"
+          echo "::add-mask::${password}"
+          echo "TEST_PASSWORD=${password}" >> "$GITHUB_ENV"
+          TEST_PASSWORD="${password}" \
+            bash dpdp-integration-test-suite/scripts/provision-test-users.sh
+
+      - name: Configure the suite
+        working-directory: dpdp-integration-test-suite
+        run: |
+          cat > .env <<EOF
+          PORTAL_BASE_URL=${IS_BASE_URL}/consent-portal
+          IS_BASE_URL=${IS_BASE_URL}
+          IGNORE_HTTPS_ERRORS=true
+          TEST_USER_USERNAME=${{ steps.users.outputs.user }}
+          TEST_USER_PASSWORD=${TEST_PASSWORD}
+          TEST_CONSENT_ADMIN_USERNAME=${{ steps.users.outputs.admin }}
+          TEST_CONSENT_ADMIN_PASSWORD=${TEST_PASSWORD}
+          TEST_USER_2_USERNAME=${{ steps.users.outputs.user2 }}
+          TEST_USER_2_PASSWORD=${TEST_PASSWORD}
+          EOF
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # npm ci and the browser install are already done, so run-e2e.sh skips both and
+      # just execs playwright. The github reporter adds inline annotations; the config
+      # itself only declares html.
+      - name: Run Playwright
+        working-directory: dpdp-integration-test-suite
+        run: ./run-e2e.sh --reporter=github,html
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            dpdp-integration-test-suite/playwright-report/
+            dpdp-integration-test-suite/test-results/
+          retention-days: 7
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: carbon-logs
+          path: ${{ env.IS_HOME }}/repository/logs/
+          retention-days: 7
+
+      - name: Stop the Identity Server
+        if: always()
+        run: |
+          "${IS_HOME}/bin/wso2server.sh" stop || true
+
+  # `e2e` itself cannot be the required status check: a job skipped by its own `if:`
+  # (which is what happens on every pull_request_target event until someone applies
+  # Action/trigger-e2e) reports a "skipped" conclusion, and GitHub's branch-protection
+  # rulesets treat "skipped" as satisfying a required check - so marking `e2e` required
+  # would let every PR merge without it ever having run. This job exists purely to be
+  # the thing a ruleset actually requires: it always runs on pull_request_target
+  # (`if: always()` so a skipped `e2e` doesn't skip this too) and fails unless `e2e`
+  # itself reports success, so it's red until the label is applied and E2E passes.
+  #
+  # This job must be selected as the required status check for `main` in Settings ->
+  # Rules -> Rulesets - that repo-admin step can't be done from this workflow file.
+  e2e-required:
+    name: E2E integration tests (required)
+    if: always() && github.event_name == 'pull_request_target'
+    needs: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check E2E actually ran and passed
+        run: |
+          if [ "${{ needs.e2e.result }}" != "success" ]; then
+            echo "::error::E2E has not passed on this commit (status: ${{ needs.e2e.result }})." \
+                 "Apply the 'Action/trigger-e2e' label to run it - a maintainer must do this" \
+                 "after reviewing the diff, since it runs with real WSO2 subscription credentials." \
+                 "The label is removed automatically on every new push, so it must be re-applied" \
+                 "after each commit."
+            exit 1
+          fi
+          echo "E2E passed."
