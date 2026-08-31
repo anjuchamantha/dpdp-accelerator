@@ -62,6 +62,10 @@ on:
         required: false
         type: boolean
         default: false
+      bump_branch:
+        description: 'Branch to raise the next -SNAPSHOT against. Defaults to dev, or the branch this ran from when there is no dev.'
+        required: false
+        type: string
 
 concurrency:
   group: release-builder
@@ -435,9 +439,8 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # Checks out the dispatched ref rather than dev directly, so a repository without a
-      # dev branch (a fork being used to rehearse a release) skips this job's work in the
-      # script below instead of failing the step outright.
+      # Checks out the dispatched ref rather than the bump target directly - the target is
+      # resolved in the script below, which cannot happen at checkout time.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -456,19 +459,33 @@ jobs:
           GH_REPO: ${{ github.repository }}
           NEXT: ${{ needs.prepare.outputs.next_version }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          BUMP_BRANCH: ${{ inputs.bump_branch }}
+          RELEASED_FROM: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
-          if ! git rev-parse --verify --quiet origin/dev >/dev/null; then
-            echo "::warning::No dev branch in ${GITHUB_REPOSITORY} - skipping the version bump."
-            exit 0
+          # Development continues on dev upstream, so that is the default target. A fork
+          # rehearsing a release usually has no dev, and there the branch the release was
+          # cut from is the sensible thing to move forward instead.
+          if [ -n "${BUMP_BRANCH}" ]; then
+            target="${BUMP_BRANCH}"
+          elif git rev-parse --verify --quiet origin/dev >/dev/null; then
+            target="dev"
+          else
+            target="${RELEASED_FROM}"
+            echo "::notice::No dev branch in ${GITHUB_REPOSITORY} - bumping ${target} instead."
+          fi
+
+          if ! git rev-parse --verify --quiet "origin/${target}" >/dev/null; then
+            echo "::error::Bump target '${target}' does not exist in ${GITHUB_REPOSITORY}."
+            exit 1
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           branch="chore/prepare-${NEXT}-SNAPSHOT"
-          git checkout -B "${branch}" origin/dev
+          git checkout -B "${branch}" "origin/${target}"
 
           mvn -B -ntp versions:set \
             -DnewVersion="${NEXT}-SNAPSHOT" \
@@ -476,7 +493,7 @@ jobs:
 
           git add -u
           if git diff --cached --quiet; then
-            echo "dev is already at ${NEXT}-SNAPSHOT - nothing to do."
+            echo "${target} is already at ${NEXT}-SNAPSHOT - nothing to do."
             exit 0
           fi
 
@@ -488,14 +505,14 @@ jobs:
           git commit -m "[Release] Prepare for the next development iteration (${NEXT}-SNAPSHOT)"
           git push --force-with-lease origin "${branch}"
 
-          existing=$(gh pr list --base dev --head "${branch}" --state open --json number --jq '.[0].number // empty')
+          existing=$(gh pr list --base "${target}" --head "${branch}" --state open --json number --jq '.[0].number // empty')
           if [ -n "${existing}" ]; then
             echo "Reusing the open PR #${existing}."
           else
             body=$(printf '%s\n\n%s\n' \
               "Raises the reactor version to \`${NEXT}-SNAPSHOT\` following the ${TAG} release." \
               "Opened by the release pipeline, so GitHub does not run \`pull_request\` checks on it. \`mvn validate\` passed on the bumped reactor during that run.")
-            gh pr create --base dev --head "${branch}" \
+            gh pr create --base "${target}" --head "${branch}" \
               --title "[Release] Prepare for the next development iteration (${NEXT}-SNAPSHOT)" \
               --body "${body}"
           fi
