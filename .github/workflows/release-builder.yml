@@ -62,10 +62,6 @@ on:
         required: false
         type: boolean
         default: false
-      bump_branch:
-        description: 'Branch to raise the next -SNAPSHOT against. Defaults to main.'
-        required: false
-        type: string
 
 concurrency:
   group: release-builder
@@ -459,22 +455,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
           NEXT: ${{ needs.prepare.outputs.next_version }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          BUMP_BRANCH: ${{ inputs.bump_branch }}
         run: |
           set -euo pipefail
-
-          target="${BUMP_BRANCH:-main}"
-
-          if ! git rev-parse --verify --quiet "origin/${target}" >/dev/null; then
-            echo "::error::Bump target '${target}' does not exist in ${GITHUB_REPOSITORY}."
-            exit 1
-          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           branch="chore/prepare-${NEXT}-SNAPSHOT"
-          git checkout -B "${branch}" "origin/${target}"
+          git checkout -B "${branch}" origin/main
 
           mvn -B -ntp versions:set \
             -DnewVersion="${NEXT}-SNAPSHOT" \
@@ -482,7 +470,7 @@ jobs:
 
           git add -u
           if git diff --cached --quiet; then
-            echo "${target} is already at ${NEXT}-SNAPSHOT - nothing to do."
+            echo "main is already at ${NEXT}-SNAPSHOT - nothing to do."
             exit 0
           fi
 
@@ -494,14 +482,14 @@ jobs:
           git commit -m "[Release] Prepare for the next development iteration (${NEXT}-SNAPSHOT)"
           git push --force-with-lease origin "${branch}"
 
-          existing=$(gh pr list --base "${target}" --head "${branch}" --state open --json number --jq '.[0].number // empty')
+          existing=$(gh pr list --base main --head "${branch}" --state open --json number --jq '.[0].number // empty')
           if [ -n "${existing}" ]; then
             echo "Reusing the open PR #${existing}."
           else
             body=$(printf '%s\n\n%s\n' \
               "Raises the reactor version to \`${NEXT}-SNAPSHOT\` following the ${TAG} release." \
               "Opened by the release pipeline, so GitHub does not run \`pull_request\` checks on it. \`mvn validate\` passed on the bumped reactor during that run.")
-            gh pr create --base "${target}" --head "${branch}" \
+            gh pr create --base main --head "${branch}" \
               --title "[Release] Prepare for the next development iteration (${NEXT}-SNAPSHOT)" \
               --body "${body}"
           fi

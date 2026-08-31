@@ -89,8 +89,7 @@ prepare ─┬─ e2e ──┐
   exact expected path. That assertion is also what proves `versions:set` reached every
   module.
 - **release** — makes the release commit, renders the notes, pushes the tag, publishes.
-- **post-release** — opens the next-`-SNAPSHOT` PR against `main`, or against the
-  `bump_branch` input when one is given.
+- **post-release** — opens the next-`-SNAPSHOT` PR against `main`.
 
 ### Why `main` never moves
 
@@ -127,8 +126,7 @@ A fork is a reasonable place to exercise the pipeline end to end, with two cavea
 - **Releasing from a branch other than `main` requires `prerelease: on`**, or `prepare`
   rejects the run by design.
 
-`post-release` targets `main` by default; pass `bump_branch` to send the version-bump PR
-somewhere else. A target that does not exist fails the job rather than skipping silently.
+`post-release` raises its version-bump PR against `main`, the same branch releases are cut from.
 
 The pipeline pins `gh` to the repository it is running in (`GH_REPO`). Without that, `gh`
 resolves a fork's base repository to its upstream parent, and a rehearsal run would aim its
