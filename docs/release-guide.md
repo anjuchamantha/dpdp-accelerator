@@ -12,7 +12,7 @@ dispatched by hand — nothing releases on a push or a merge.
 |---|---|
 | Tag | `vX.Y.Z`, pointing at a `[Release] X.Y.Z` commit |
 | Release assets | `wso2-dpdp-is-accelerator-X.Y.Z.zip`, plus the source archives GitHub attaches to every release automatically. GitHub publishes a SHA-256 digest for each asset itself, so no checksum sidecar is uploaded |
-| Follow-up | A PR against `dev` raising the reactor to the next `-SNAPSHOT` |
+| Follow-up | A PR against `main` raising the reactor to the next `-SNAPSHOT` |
 
 The root `pom.xml` is the single source of truth for the version — there is deliberately no
 `version.txt` to drift from it. Every child pom inherits the version through `<parent>` and
@@ -31,8 +31,7 @@ branch (`main`). Until then there is nothing to dispatch.
 
 ### 1. Put `main` on the commit you want to ship
 
-The pipeline releases whatever `main` currently points at. It does no merging of its own, so
-land `dev` into `main` first.
+The pipeline releases whatever `main` currently points at. It does no merging of its own.
 
 ### 2. Optionally write the highlights
 
@@ -70,7 +69,7 @@ needs).
 
 ### 5. Merge the version-bump PR
 
-The PR against `dev` arrives **without checks**. GitHub does not run `pull_request` workflows
+The PR against `main` arrives **without checks**. GitHub does not run `pull_request` workflows
 on a PR opened by `GITHUB_TOKEN`, so the pipeline runs `mvn validate` on the bumped reactor
 during the release run instead and says so in the PR body.
 
@@ -90,7 +89,8 @@ prepare ─┬─ e2e ──┐
   exact expected path. That assertion is also what proves `versions:set` reached every
   module.
 - **release** — makes the release commit, renders the notes, pushes the tag, publishes.
-- **post-release** — opens the next-`-SNAPSHOT` PR against `dev`.
+- **post-release** — opens the next-`-SNAPSHOT` PR against `main`, or against the
+  `bump_branch` input when one is given.
 
 ### Why `main` never moves
 
@@ -98,9 +98,9 @@ The release commit is published by pushing **only the tag**. `git push origin re
 carries the commit's objects with it, so the commit is reachable through the tag without any
 branch being written to.
 
-The consequence to be aware of: **`main` stays on `-SNAPSHOT`**. `git checkout vX.Y.Z` gives
-exactly the tree that produced the artifact, and `git log main` does not show the release
-commit. `main` picks up the new version later, when `dev` merges forward.
+The consequence to be aware of: **the release commit is not on `main`**. `git checkout vX.Y.Z`
+gives exactly the tree that produced the artifact, and `git log main` does not show the release
+commit. `main` moves to the next `-SNAPSHOT` through the post-release PR instead.
 
 This is what keeps the whole pipeline inside `GITHUB_TOKEN`'s reach — it needs no repository
 secret, only the `contents: write` and `pull-requests: write` permissions declared in the
@@ -127,9 +127,8 @@ A fork is a reasonable place to exercise the pipeline end to end, with two cavea
 - **Releasing from a branch other than `main` requires `prerelease: on`**, or `prepare`
   rejects the run by design.
 
-A fork with no `dev` branch is handled: `post-release` logs a warning and skips rather than
-failing a run that has already published successfully. Create a `dev` branch in the fork if
-you want to exercise that job too.
+`post-release` targets `main` by default; pass `bump_branch` to send the version-bump PR
+somewhere else. A target that does not exist fails the job rather than skipping silently.
 
 The pipeline pins `gh` to the repository it is running in (`GH_REPO`). Without that, `gh`
 resolves a fork's base repository to its upstream parent, and a rehearsal run would aim its

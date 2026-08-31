@@ -17,7 +17,7 @@
 # Build + end-to-end checks for the DPDP accelerator. The E2E job itself lives in the
 # reusable `e2e.yml`, shared with `release-builder.yml`.
 #
-# No ruleset yet marks these as required checks on main/dev (needs admin access) -
+# No ruleset yet marks these as required checks on main (needs admin access) -
 # `e2e-required` is red until that's set up, but doesn't currently block merge.
 #
 # `pull_request` -> `build` only (every PR, including forks, no secrets).
@@ -33,9 +33,9 @@ name: PR checks
 
 on:
   pull_request:
-    branches: [main, dev]
+    branches: [main]
   pull_request_target:
-    branches: [main, dev]
+    branches: [main]
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
     inputs:

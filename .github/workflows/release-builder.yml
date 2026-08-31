@@ -63,7 +63,7 @@ on:
         type: boolean
         default: false
       bump_branch:
-        description: 'Branch to raise the next -SNAPSHOT against. Defaults to dev, or the branch this ran from when there is no dev.'
+        description: 'Branch to raise the next -SNAPSHOT against. Defaults to main.'
         required: false
         type: string
 
@@ -427,8 +427,8 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # Raised as a PR rather than pushed: dev is protected, and this is the step that both
-  # reference pipelines had to disable or work around for exactly that reason.
+  # Raised as a PR rather than pushed: the target branch is protected, and this is the step
+  # that both reference pipelines had to disable or work around for exactly that reason.
   post-release:
     name: Next development version
     needs: [prepare, release]
@@ -460,21 +460,10 @@ jobs:
           NEXT: ${{ needs.prepare.outputs.next_version }}
           TAG: ${{ needs.prepare.outputs.tag }}
           BUMP_BRANCH: ${{ inputs.bump_branch }}
-          RELEASED_FROM: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
-          # Development continues on dev upstream, so that is the default target. A fork
-          # rehearsing a release usually has no dev, and there the branch the release was
-          # cut from is the sensible thing to move forward instead.
-          if [ -n "${BUMP_BRANCH}" ]; then
-            target="${BUMP_BRANCH}"
-          elif git rev-parse --verify --quiet origin/dev >/dev/null; then
-            target="dev"
-          else
-            target="${RELEASED_FROM}"
-            echo "::notice::No dev branch in ${GITHUB_REPOSITORY} - bumping ${target} instead."
-          fi
+          target="${BUMP_BRANCH:-main}"
 
           if ! git rev-parse --verify --quiet "origin/${target}" >/dev/null; then
             echo "::error::Bump target '${target}' does not exist in ${GITHUB_REPOSITORY}."
