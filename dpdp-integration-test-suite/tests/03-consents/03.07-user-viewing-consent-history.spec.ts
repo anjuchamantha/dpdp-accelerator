@@ -55,7 +55,7 @@ test.describe('User viewing Consent History (UI)', () => {
     await detailPage.goto(consentId)
     await detailPage.openActionDialog('approve')
     await detailPage.confirmAction('approve')
-    await expect(userPage.getByText('Active', { exact: true })).toBeVisible()
+    await expect(detailPage.statusChip('Active')).toBeVisible()
 
     // See the file-level comment above - the history queries need a fresh page load.
     await detailPage.goto(consentId)
@@ -120,7 +120,7 @@ test.describe('User viewing Consent History (UI)', () => {
     await detailPage.confirmAction('reject')
     // .first(): the metadata card's state chip and the authorizations table's own state chip
     // both render the literal state text (see 02.01.02's identical comment).
-    await expect(userPage.getByText('Rejected', { exact: true }).first()).toBeVisible()
+    await expect(detailPage.statusChip('Rejected')).toBeVisible()
 
     await detailPage.goto(consentId)
 
@@ -155,12 +155,12 @@ test.describe('User viewing Consent History (UI)', () => {
     await detailPage.goto(consentId)
     await detailPage.openActionDialog('approve')
     await detailPage.confirmAction('approve')
-    await expect(userPage.getByText('Active', { exact: true })).toBeVisible()
+    await expect(detailPage.statusChip('Active')).toBeVisible()
 
     // Chained without a reload - Revoke becomes available reactively once Active is reflected.
     await detailPage.openActionDialog('revoke')
     await detailPage.confirmAction('revoke')
-    await expect(userPage.getByText('Revoked', { exact: true }).first()).toBeVisible()
+    await expect(detailPage.statusChip('Revoked')).toBeVisible()
 
     // See the file-level comment above - the history queries need a fresh page load.
     await detailPage.goto(consentId)

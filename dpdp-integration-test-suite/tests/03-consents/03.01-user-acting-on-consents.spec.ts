@@ -85,7 +85,7 @@ test.describe('User acting on Consents (UI)', () => {
     // .first(): the metadata card's state chip and the authorizations table's own state chip
     // both render the literal state text once the sole authorizer (this same user)
     // is also moved to Rejected.
-    await expect(userPage.getByText('Rejected', { exact: true }).first()).toBeVisible()
+    await expect(detailPage.statusChip('Rejected')).toBeVisible()
     await userPage.context().close()
     await consentAdminPage.context().close()
   })
@@ -141,7 +141,7 @@ test.describe('User acting on Consents (UI)', () => {
     await detailPage.openActionDialog('approve')
     await detailPage.confirmAction('approve')
 
-    await expect(userPage.getByText('Active', { exact: true })).toBeVisible()
+    await expect(detailPage.statusChip('Active')).toBeVisible()
     await userPage.context().close()
     await consentAdminPage.context().close()
   })

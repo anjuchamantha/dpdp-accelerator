@@ -101,7 +101,7 @@ test.describe('Admin viewing Consent History (UI)', () => {
     await selfDetailPage.goto(consentId)
     await selfDetailPage.openActionDialog('approve')
     await selfDetailPage.confirmAction('approve')
-    await expect(userPage.getByText('Active', { exact: true })).toBeVisible()
+    await expect(selfDetailPage.statusChip('Active')).toBeVisible()
 
     // First load happens after the approval already landed server-side, so a single navigation
     // is enough here - unlike the "goto() twice" cases elsewhere in this file.
@@ -144,7 +144,7 @@ test.describe('Admin viewing Consent History (UI)', () => {
     await selfDetailPage.goto(consentId)
     await selfDetailPage.openActionDialog('approve')
     await selfDetailPage.confirmAction('approve')
-    await expect(userPage.getByText('Active', { exact: true })).toBeVisible()
+    await expect(selfDetailPage.statusChip('Active')).toBeVisible()
 
     const adminDetailPage = new ConsentDetailPage(consentAdminPage, 'admin')
     await adminDetailPage.goto(consentId)

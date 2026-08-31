@@ -76,6 +76,18 @@ export class ConsentDetailPage {
     await this.page.goto(`${basePath}/${consentId}`)
   }
 
+  /**
+   * The consent's own state, as the chip in ConsentMetadataCard's header. Three other places
+   * render the same state words - the authorization rows, the lifecycle rows and the snapshot
+   * dialog - so this is scoped to the card header's action slot, where only this chip lives.
+   * A bare getByText('Active') matches several of them.
+   */
+  statusChip(status: string): Locator {
+    return this.page
+      .locator('.MuiCardHeader-action .MuiChip-label')
+      .filter({ hasText: new RegExp(`^${status}$`) })
+  }
+
   purposeSummary(purposeName: string): Locator {
     return this.purposesSection.getByRole('button', { name: new RegExp(purposeName) })
   }
