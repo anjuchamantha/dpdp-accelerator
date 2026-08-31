@@ -112,7 +112,10 @@
                         <Export-Package>
                             org.wso2.dpdp.accelerator.event.notifications.common.*;version="${project.version}"
                         </Export-Package>
-                        <Import-Package>*</Import-Package>
+                        <Import-Package>
+                            com.fasterxml.jackson.annotation;version="${jackson.imp.pkg.version.range}",
+                            *
+                        </Import-Package>
                     </instructions>
                 </configuration>
             </plugin>

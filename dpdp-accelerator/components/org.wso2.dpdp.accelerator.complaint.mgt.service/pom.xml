@@ -270,6 +270,7 @@
                             org.wso2.dpdp.accelerator.common.config;version="${project.version}",
                             org.wso2.dpdp.accelerator.common.util;version="${project.version}",
                             org.osgi.framework;version="[1.8,2)",
+                            com.fasterxml.jackson.annotation;version="${jackson.imp.pkg.version.range}",
                             *
                         </Import-Package>
                     </instructions>

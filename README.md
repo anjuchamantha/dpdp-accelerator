@@ -30,6 +30,8 @@ installation.
   delivery history.
 - [`docs/localization-guide.md`](docs/localization-guide.md) — correcting UI
   wording and localizing Purposes/Elements on a running deployment.
+- [`docs/release-guide.md`](docs/release-guide.md) — cutting a release with the
+  Release builder workflow.
 
 ## Roles
 

@@ -1,0 +1,298 @@
+# Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Deploys a fresh Identity Server, applies the accelerator to it and runs the Playwright
+# suite against it. Reusable so `pr-checks.yml` (label-gated PR runs) and
+# `release-builder.yml` (release gate) exercise exactly the same path.
+name: E2E integration tests
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Ref or SHA to check out. Empty means the ref that triggered the caller.
+        required: false
+        type: string
+        default: ''
+      is_source:
+        description: Where to get the Identity Server pack from - `release` or `master`.
+        required: false
+        type: string
+        default: master
+      allow_unsafe_pr_checkout:
+        description: Permit checking out fork code. Only ever true for a reviewed, label-gated PR.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SOLUTIONS_BOT_EMAIL:
+        required: false
+      SOLUTIONS_BOT_U2_PASSWORD:
+        required: false
+      WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  IS_VERSION: 7.3.0
+
+jobs:
+  e2e:
+    name: E2E integration tests
+    runs-on: ubuntu-latest
+    # Generous enough to cover a from-source product-is build plus one provisioning restart.
+    timeout-minutes: 110
+    env:
+      IS_BASE_URL: https://localhost:9443
+      IS_SOURCE: ${{ inputs.is_source }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Build the accelerator
+        run: mvn -B clean install
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+      # --- Obtaining the IS pack: two mutually exclusive paths ------------------
+
+      # Keyed on version alone since a published release asset is immutable.
+      - name: Cache IS pack
+        id: is-cache
+        if: env.IS_SOURCE == 'release'
+        uses: actions/cache@v4
+        with:
+          path: ~/is-pack
+          key: wso2is-${{ env.IS_VERSION }}
+
+      - name: Download IS ${{ env.IS_VERSION }}
+        if: env.IS_SOURCE == 'release' && steps.is-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/is-pack && cd ~/is-pack
+          base="https://github.com/wso2/product-is/releases/download/v${IS_VERSION}"
+          curl -fL --retry 3 -o wso2is.zip    "${base}/wso2is-${IS_VERSION}.zip"
+          curl -fL --retry 3 -o wso2is.sha256 "${base}/wso2is-${IS_VERSION}.zip.sha256"
+          echo "$(cut -d' ' -f1 wso2is.sha256)  wso2is.zip" | sha256sum -c -
+
+      - name: Cache Maven repo for the product-is build
+        if: env.IS_SOURCE == 'master'
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: product-is-master-m2-${{ github.run_id }}
+          restore-keys: |
+            product-is-master-m2-
+
+      - name: Build IS from product-is master
+        if: env.IS_SOURCE == 'master'
+        run: |
+          git clone --depth 1 https://github.com/wso2/product-is.git /tmp/product-is
+          cd /tmp/product-is
+          mvn -B -ntp install \
+            -Dmaven.test.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip=true \
+            -Dpmd.skip=true -Drat.skip=true -Dlicense.skip=true \
+            -Dmaven.javadoc.skip=true -Djacoco.skip=true
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+      - name: Stage the built distribution zip
+        if: env.IS_SOURCE == 'master'
+        run: |
+          zip_path=$(find /tmp/product-is/modules/distribution/target -maxdepth 1 -name "wso2is-*.zip" | head -1)
+          if [ -z "${zip_path}" ]; then
+            echo "::error::No wso2is-*.zip under modules/distribution/target - did the module path change?"
+            exit 1
+          fi
+          mkdir -p ~/is-pack
+          cp "${zip_path}" ~/is-pack/wso2is.zip
+          echo "Built $(basename "${zip_path}")"
+
+      - name: Unpack IS
+        run: unzip -q ~/is-pack/wso2is.zip -d "${GITHUB_WORKSPACE}"
+
+      - name: Resolve IS_HOME
+        run: |
+          dir=$(find "${GITHUB_WORKSPACE}" -maxdepth 1 -type d -name "wso2is-*")
+          if [ -z "${dir}" ]; then
+            echo "::error::No wso2is-* directory found after unpacking"
+            exit 1
+          fi
+          echo "IS_HOME=${dir}" >> "$GITHUB_ENV"
+          echo "Resolved IS_HOME=${dir}"
+
+      # Only for the explicit `release` path - a vanilla GA pack lacks the consent-mgt
+      # v2 API resources this accelerator needs; a from-source build already has them.
+      - name: Apply WSO2 U2 updates
+        if: env.IS_SOURCE == 'release'
+        env:
+          WSO2_USERNAME: ${{ secrets.SOLUTIONS_BOT_EMAIL }}
+          WSO2_PASSWORD: ${{ secrets.SOLUTIONS_BOT_U2_PASSWORD }}
+          WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE: ${{ secrets.WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE }}
+        run: |
+          if [ -z "${WSO2_USERNAME}" ] || [ -z "${WSO2_PASSWORD}" ]; then
+            echo "::error::WSO2_USERNAME/WSO2_PASSWORD are empty - SOLUTIONS_BOT_EMAIL and" \
+                 "SOLUTIONS_BOT_U2_PASSWORD must be configured as repository secrets for the" \
+                 "release+U2 path to work."
+            exit 1
+          fi
+          if [ -z "${WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE}" ]; then
+            echo "::error::WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE is empty - it must be" \
+                 "configured as a repository secret to decrypt .github/ci-tools/update_tool_setup.sh.gpg."
+            exit 1
+          fi
+          gpg --quiet --batch --yes --decrypt \
+            --passphrase="${WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE}" \
+            --output "$IS_HOME/bin/update_tool_setup.sh" \
+            "${GITHUB_WORKSPACE}/.github/ci-tools/update_tool_setup.sh.gpg"
+          chmod +x "$IS_HOME/bin/update_tool_setup.sh"
+          cd "$IS_HOME"
+          bash bin/update_tool_setup.sh
+          # One retry - the updater is network-flaky.
+          bin/wso2update_linux -v --username "$WSO2_USERNAME" --password "$WSO2_PASSWORD" \
+            || bin/wso2update_linux -v --username "$WSO2_USERNAME" --password "$WSO2_PASSWORD"
+
+      # The unpacked directory is named after the zip, which carries the pom version -
+      # derive it rather than hardcoding, so a release build works unchanged.
+      - name: Apply the accelerator
+        run: |
+          zip_path=$(find dpdp-accelerator/accelerators/dpdp-is/target -maxdepth 1 -name "wso2-dpdp-is-accelerator-*.zip" | head -1)
+          if [ -z "${zip_path}" ]; then
+            echo "::error::No wso2-dpdp-is-accelerator-*.zip under dpdp-accelerator/accelerators/dpdp-is/target"
+            exit 1
+          fi
+          unzip -q "${zip_path}" -d "$IS_HOME"
+          cd "${IS_HOME}/$(basename "${zip_path}" .zip)"
+          bash bin/merge.sh     "$IS_HOME"
+          bash bin/configure.sh "$IS_HOME"
+
+      - name: Start the Identity Server
+        run: |
+          "${IS_HOME}/bin/wso2server.sh" start
+          for i in $(seq 1 60); do
+            if curl -sk -o /dev/null -f "${IS_BASE_URL}/oauth2/jwks"; then
+              echo "Identity Server ready after ~$((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Identity Server did not become ready within 300s"
+          tail -200 "${IS_HOME}/repository/logs/wso2carbon.log"
+          exit 1
+
+      - name: Verify accelerator provisioning
+        run: |
+          roles_found() {
+            curl -sk -u admin:admin \
+              "${IS_BASE_URL}/scim2/v2/Roles?filter=displayName+eq+dpdp-consent-admin" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin).get("totalResults", 0))'
+          }
+          wait_for_is() {
+            for i in $(seq 1 60); do
+              curl -sk -o /dev/null -f "${IS_BASE_URL}/oauth2/jwks" && return 0
+              sleep 5
+            done
+            return 1
+          }
+
+          max_restarts=1
+          attempt=0
+          while [ "$(roles_found)" != "1" ]; do
+            if [ "${attempt}" -ge "${max_restarts}" ]; then
+              echo "::error::Accelerator did not provision dpdp-consent-admin for carbon.super after ${max_restarts} restarts"
+              grep -n "Error provisioning the DPDP Consent Portal" \
+                "${IS_HOME}/repository/logs/wso2carbon.log" || true
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "::warning::dpdp-consent-admin missing after startup; restart ${attempt}/${max_restarts}"
+            "${IS_HOME}/bin/wso2server.sh" restart
+            wait_for_is || { echo "::error::Identity Server did not come back up after restart ${attempt}"; exit 1; }
+          done
+
+          if [ "${attempt}" -gt 0 ]; then
+            echo "Provisioning verified after ${attempt} restart(s)."
+          else
+            echo "Provisioning verified."
+          fi
+
+      - name: Provision test users
+        id: users
+        run: |
+          # Ephemeral, but masked so it can't reach a log.
+          password="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9')Aa1!"
+          echo "::add-mask::${password}"
+          echo "TEST_PASSWORD=${password}" >> "$GITHUB_ENV"
+          TEST_PASSWORD="${password}" \
+            bash dpdp-integration-test-suite/scripts/provision-test-users.sh
+
+      - name: Configure the suite
+        working-directory: dpdp-integration-test-suite
+        run: |
+          cat > .env <<EOF
+          PORTAL_BASE_URL=${IS_BASE_URL}/consent-portal
+          IS_BASE_URL=${IS_BASE_URL}
+          IGNORE_HTTPS_ERRORS=true
+          TEST_USER_USERNAME=${{ steps.users.outputs.user }}
+          TEST_USER_PASSWORD=${TEST_PASSWORD}
+          TEST_CONSENT_ADMIN_USERNAME=${{ steps.users.outputs.admin }}
+          TEST_CONSENT_ADMIN_PASSWORD=${TEST_PASSWORD}
+          TEST_USER_2_USERNAME=${{ steps.users.outputs.user2 }}
+          TEST_USER_2_PASSWORD=${TEST_PASSWORD}
+          EOF
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # npm ci / browser install already done, so run-e2e.sh just execs playwright.
+      - name: Run Playwright
+        working-directory: dpdp-integration-test-suite
+        run: ./run-e2e.sh --reporter=github,html
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            dpdp-integration-test-suite/playwright-report/
+            dpdp-integration-test-suite/test-results/
+          retention-days: 7
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: carbon-logs
+          path: ${{ env.IS_HOME }}/repository/logs/
+          retention-days: 7
+
+      - name: Stop the Identity Server
+        if: always()
+        run: |
+          "${IS_HOME}/bin/wso2server.sh" stop || true

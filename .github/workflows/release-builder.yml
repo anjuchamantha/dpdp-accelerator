@@ -1,0 +1,501 @@
+# Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Builds the accelerator distribution and publishes it as a GitHub release.
+#
+#   prepare ─┬─ e2e ──┐
+#            └─ build ─┴─ release ── post-release
+#
+# The root pom is the single source of truth for the version - there is deliberately no
+# version.txt to drift from it. `mvn versions:set` fans the release version out to every
+# module, since each child pom inherits it through <parent> and declares none of its own.
+#
+# Convention: `v` prefix in git tags, bare semver in poms and filenames. Maven cannot
+# resolve a v-prefixed version, so the two must not be conflated.
+#
+# The release commit is published by pushing the tag alone - `git push origin
+# refs/tags/vX.Y.Z` carries the commit's objects with it - so no branch is ever written
+# to and `main` stays on -SNAPSHOT. The tagged tree is still exactly what was built.
+# That keeps the whole pipeline inside GITHUB_TOKEN's reach: it needs no repository
+# secret, only the `contents: write` / `pull-requests: write` permissions declared below.
+#
+# The tag is pushed only after the build and the E2E gate have passed, so a failure
+# anywhere earlier leaves no orphan tag behind.
+name: Release builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, bare semver (e.g. 1.0.0). Defaults to the root pom version with -SNAPSHOT stripped.'
+        required: false
+        type: string
+      next_version:
+        description: 'Next development version, bare semver (e.g. 1.1.0). Defaults to a minor bump.'
+        required: false
+        type: string
+      prerelease:
+        description: Mark the GitHub release as a pre-release
+        required: false
+        type: boolean
+        default: false
+      run_e2e:
+        description: Run the E2E suite as a release gate
+        required: false
+        type: boolean
+        default: true
+      dry_run:
+        description: Build and render everything, but do not commit, tag or publish
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-builder
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      next_version: ${{ steps.resolve.outputs.next_version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      # fetch-depth: 0 so the duplicate-tag check below sees every tag - it would
+      # silently pass on a shallow clone.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Resolve and validate the version
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          version="${{ inputs.version }}"
+          if [ -z "${version}" ]; then
+            version=$(mvn -B -ntp -q help:evaluate -Dexpression=project.version -DforceStdout | tail -1)
+            version="${version%-SNAPSHOT}"
+          fi
+          version=$(echo "${version}" | tr -d '[:space:]')
+
+          if [[ "${version}" == v* ]]; then
+            echo "::error::Version must be bare semver with no leading 'v' - Maven cannot" \
+                 "resolve a v-prefixed version. Got '${version}'."
+            exit 1
+          fi
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '${version}' is not X.Y.Z[-qualifier]."
+            exit 1
+          fi
+
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag '${tag}' already exists."
+            exit 1
+          fi
+
+          # A full release is cut from main; anything else has to be flagged a pre-release.
+          if [ "${{ inputs.prerelease }}" != "true" ] && [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::A full release must be built from main (got ${{ github.ref }})." \
+                 "Re-run with prerelease enabled to release from another branch."
+            exit 1
+          fi
+
+          next="${{ inputs.next_version }}"
+          if [ -z "${next}" ]; then
+            base="${version%%-*}"
+            IFS='.' read -r major minor _patch <<< "${base}"
+            next="${major}.$((minor + 1)).0"
+          fi
+          next=$(echo "${next}" | tr -d '[:space:]')
+          if ! [[ "${next}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Next development version '${next}' is not X.Y.Z."
+            exit 1
+          fi
+
+          {
+            echo "version=${version}"
+            echo "next_version=${next}"
+            echo "tag=${tag}"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release plan"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`${version}\` |"
+            echo "| Tag | \`${tag}\` |"
+            echo "| Commit | \`$(git rev-parse --short HEAD)\` |"
+            echo "| Next development version | \`${next}-SNAPSHOT\` |"
+            echo "| Pre-release | \`${{ inputs.prerelease }}\` |"
+            echo "| Dry run | \`${{ inputs.dry_run }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Gates the release on the same suite that gates a PR - see e2e.yml.
+  e2e:
+    name: E2E gate
+    needs: prepare
+    if: ${{ inputs.run_e2e }}
+    uses: ./.github/workflows/e2e.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      is_source: master
+    secrets: inherit
+
+  build:
+    name: Build the distribution
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Set the release version
+        run: |
+          mvn -B -ntp versions:set \
+            -DnewVersion="${{ needs.prepare.outputs.version }}" \
+            -DprocessAllModules=true -DgenerateBackupPoms=false
+
+      # `mvn clean install` is the full gate on its own: unit tests, the per-module Jacoco
+      # minimum, and the frontend's tsc / security:verify / i18n:verify chain.
+      - name: Build
+        run: mvn -B clean install
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+      # The zip carries the pom version in its name, so finding it at the exact expected
+      # path is also what proves versions:set reached every module.
+      - name: Collect the distribution
+        run: |
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          zip="dpdp-accelerator/accelerators/dpdp-is/target/wso2-dpdp-is-accelerator-${version}.zip"
+          if [ ! -f "${zip}" ]; then
+            echo "::error::Expected ${zip}, which means versions:set did not reach every module."
+            ls -1 dpdp-accelerator/accelerators/dpdp-is/target/*.zip 2>/dev/null || true
+            exit 1
+          fi
+          mkdir -p dist
+          cp "${zip}" dist/
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dpdp-accelerator-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish
+    needs: [prepare, build, e2e]
+    # `always()` so a deliberately skipped E2E gate doesn't skip the release with it;
+    # the explicit result checks are what actually enforce the gate.
+    if: >
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.build.result == 'success' &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      # Default credentials are enough: the only ref this job writes is a tag.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dpdp-accelerator-dist
+          path: dist
+
+      - name: Create the release commit
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mvn -B -ntp versions:set \
+            -DnewVersion="${{ needs.prepare.outputs.version }}" \
+            -DprocessAllModules=true -DgenerateBackupPoms=false
+
+          # -u so only tracked poms are staged, never stray build output.
+          git add -u
+          if git diff --cached --quiet; then
+            echo "Already at ${{ needs.prepare.outputs.version }} - no release commit needed."
+          else
+            git commit -m "[Release] ${{ needs.prepare.outputs.version }}"
+          fi
+          git tag -a "${{ needs.prepare.outputs.tag }}" \
+            -m "Release ${{ needs.prepare.outputs.version }}"
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the release notes
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const version = process.env.VERSION;
+            const tag = process.env.TAG;
+
+            // Newest release that isn't this one bounds the auto-generated changelog.
+            let previousTag = null;
+            try {
+              const { data } = await github.rest.repos.listReleases({ owner, repo, per_page: 5 });
+              const prior = data.filter(r => r.tag_name !== tag);
+              if (prior.length > 0) previousTag = prior[0].tag_name;
+            } catch (e) {
+              core.info(`Could not list previous releases: ${e.message}`);
+            }
+
+            // Degrades to an empty changelog on the very first release, rather than failing.
+            let changelog = '';
+            try {
+              const params = { owner, repo, tag_name: tag };
+              if (previousTag) params.previous_tag_name = previousTag;
+              const { data } = await github.rest.repos.generateReleaseNotes(params);
+              changelog = (data.body || '').trim();
+            } catch (e) {
+              core.info(`Could not generate the changelog: ${e.message}`);
+            }
+
+            // Editorial highlights are handwritten - no API can infer them. Commit
+            // release-notes/<version>.md to have them appear here.
+            let highlights = '';
+            const notesPath = `release-notes/${version}.md`;
+            if (fs.existsSync(notesPath)) {
+              highlights = fs.readFileSync(notesPath, 'utf8').trim();
+            }
+
+            const zip = `wso2-dpdp-is-accelerator-${version}.zip`;
+            const dl = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
+            const src = `https://github.com/${owner}/${repo}/blob/${tag}`;
+
+            const lines = [
+              `The WSO2 Solutions team is pleased to announce the release of the **WSO2 DPDP Accelerator ${version}**.`,
+              '',
+              'It contains the accelerator components installable over WSO2 Identity Server 7.3.0.',
+              '',
+              '## Distribution',
+              '',
+              '| Artifact | Download |',
+              '|---|---|',
+              `| Accelerator | [${zip}](${dl}/${zip}) |`,
+              `| Source code | [${repo}-${version}.zip](https://github.com/${owner}/${repo}/archive/refs/tags/${tag}.zip) |`,
+              '',
+              '## How to run',
+              '',
+              '```sh',
+              `unzip ${zip}`,
+              `cd wso2-dpdp-is-accelerator-${version}`,
+              'bash bin/merge.sh     <IS_HOME>',
+              'bash bin/configure.sh <IS_HOME>',
+              '```',
+              '',
+              `See the [setup guide](${src}/docs/setup-guide.md) for prerequisites and the full procedure, and the [configuration guide](${src}/docs/configuration-guide.md) for the consent portal application and roles.`,
+            ];
+
+            if (highlights) {
+              lines.push('', '## What\'s new', '', highlights);
+            }
+            if (changelog) {
+              lines.push('', '---', '', changelog);
+            }
+
+            lines.push(
+              '',
+              '## Known issues',
+              '',
+              `All open issues are tracked [here](https://github.com/${owner}/${repo}/issues).`,
+              '',
+              '## How to contribute',
+              '',
+              `Please report issues, improvements and feature requests through [GitHub issues](https://github.com/${owner}/${repo}/issues).`,
+              '',
+              'Security issues must be reported to [security@wso2.com](mailto:security@wso2.com) rather than as a GitHub issue, so they reach the right audience. Please follow the [WSO2 Security Vulnerability Reporting Guidelines](https://security.docs.wso2.com/en/latest/security-reporting/vulnerability-reporting-guidelines/).',
+              '',
+              '~ WSO2 Solutions Team ~',
+            );
+
+            const body = lines.join('\n');
+            fs.writeFileSync('release-body.md', body);
+            core.info(`Release notes rendered (${body.length} chars).`);
+
+      # Pushing the tag carries the release commit's objects with it, so the commit stays
+      # reachable through the tag without `main` ever being written to.
+      - name: Push the release tag
+        if: ${{ !inputs.dry_run }}
+        run: git push origin "refs/tags/${{ needs.prepare.outputs.tag }}"
+
+      - name: Create the GitHub release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: WSO2 DPDP Accelerator ${{ needs.prepare.outputs.version }}
+          body_path: release-body.md
+          files: dist/*.zip
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: false
+
+      - name: Upload the dry-run preview
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-preview
+          path: |
+            release-body.md
+            dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Summarise
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            {
+              echo "### Dry run - nothing was published"
+              echo ""
+              echo "The release commit was made locally and discarded. Download the"
+              echo "\`release-preview\` artifact to review the notes and the distribution."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### Released ${{ needs.prepare.outputs.tag }}"
+              echo ""
+              echo "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Raised as a PR rather than pushed: dev is protected, and this is the step that both
+  # reference pipelines had to disable or work around for exactly that reason.
+  post-release:
+    name: Next development version
+    needs: [prepare, release]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Checks out the dispatched ref rather than dev directly, so a repository without a
+      # dev branch (a fork being used to rehearse a release) skips this job's work in the
+      # script below instead of failing the step outright.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Open the version-bump PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh resolves the base repo to the upstream parent inside a fork, which would
+          # aim this PR at wso2/dpdp-accelerator from someone's rehearsal run. Pin it.
+          GH_REPO: ${{ github.repository }}
+          NEXT: ${{ needs.prepare.outputs.next_version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if ! git rev-parse --verify --quiet origin/dev >/dev/null; then
+            echo "::warning::No dev branch in ${GITHUB_REPOSITORY} - skipping the version bump."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          branch="chore/prepare-${NEXT}-SNAPSHOT"
+          git checkout -B "${branch}" origin/dev
+
+          mvn -B -ntp versions:set \
+            -DnewVersion="${NEXT}-SNAPSHOT" \
+            -DprocessAllModules=true -DgenerateBackupPoms=false
+
+          git add -u
+          if git diff --cached --quiet; then
+            echo "dev is already at ${NEXT}-SNAPSHOT - nothing to do."
+            exit 0
+          fi
+
+          # A PR opened with GITHUB_TOKEN does not trigger `pull_request` workflows, so
+          # this PR arrives without checks. Resolving the reactor here is the substitute
+          # evidence that the bump left every pom consistent.
+          mvn -B -ntp -q validate
+
+          git commit -m "[Release] Prepare for the next development iteration (${NEXT}-SNAPSHOT)"
+          git push --force-with-lease origin "${branch}"
+
+          existing=$(gh pr list --base dev --head "${branch}" --state open --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            echo "Reusing the open PR #${existing}."
+          else
+            body=$(printf '%s\n\n%s\n' \
+              "Raises the reactor version to \`${NEXT}-SNAPSHOT\` following the ${TAG} release." \
+              "Opened by the release pipeline, so GitHub does not run \`pull_request\` checks on it. \`mvn validate\` passed on the bumped reactor during that run.")
+            gh pr create --base dev --head "${branch}" \
+              --title "[Release] Prepare for the next development iteration (${NEXT}-SNAPSHOT)" \
+              --body "${body}"
+          fi

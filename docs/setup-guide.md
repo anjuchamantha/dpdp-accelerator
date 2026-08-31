@@ -9,12 +9,16 @@ registers the portal application.
 - JDK 21 or later on the PATH
 - Maven 3.6.3+ and Node.js 20.19+ (or 22.12+) with npm, only if building the
   accelerator from source
+- A WSO2 subscription, to apply the mandatory U2 updates to the Identity Server
 
 ## 1. Get WSO2 Identity Server
 
 Download and extract WSO2 Identity Server 7.3.0 from the
 [WSO2 Identity Server](https://wso2.com/identity-and-access-management/)
 site. The extracted directory is `<IS_HOME>` in the steps below.
+
+Apply the U2 updates to the pack before going any further. The accelerator does
+not run on an un-updated 7.3.0.
 
 ## 2. Get the accelerator
 
