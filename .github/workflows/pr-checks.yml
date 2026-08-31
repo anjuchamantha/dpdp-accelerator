@@ -232,6 +232,7 @@ jobs:
         env:
           WSO2_USERNAME: ${{ secrets.SOLUTIONS_BOT_EMAIL }}
           WSO2_PASSWORD: ${{ secrets.SOLUTIONS_BOT_U2_PASSWORD }}
+          WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE: ${{ secrets.WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE }}
         run: |
           if [ -z "${WSO2_USERNAME}" ] || [ -z "${WSO2_PASSWORD}" ]; then
             echo "::error::WSO2_USERNAME/WSO2_PASSWORD are empty - SOLUTIONS_BOT_EMAIL and" \
@@ -239,6 +240,16 @@ jobs:
                  "default release+U2 path to work."
             exit 1
           fi
+          if [ -z "${WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE}" ]; then
+            echo "::error::WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE is empty - it must be" \
+                 "configured as a repository secret to decrypt .github/ci-tools/update_tool_setup.sh.enc."
+            exit 1
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+            -in "${GITHUB_WORKSPACE}/.github/ci-tools/update_tool_setup.sh.enc" \
+            -pass env:WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE \
+            -out "$IS_HOME/bin/update_tool_setup.sh"
+          chmod +x "$IS_HOME/bin/update_tool_setup.sh"
           cd "$IS_HOME"
           bash bin/update_tool_setup.sh
           # One retry: the updater is network-flaky, which is why FSA retries it too.
