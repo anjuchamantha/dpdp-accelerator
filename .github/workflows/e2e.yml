@@ -256,8 +256,9 @@ jobs:
           bash bin/merge.sh     "$IS_HOME"
           bash bin/configure.sh "$IS_HOME"
 
-      # Upstream's pr-checks.yml has an "Enable private-network webhook callbacks" step here,
-      # calling dpdp-integration-test-suite/scripts/enable-webhook-callbacks.sh. That script is
+      # The workflow this job was lifted from has an "Enable private-network webhook
+      # callbacks" step here, calling
+      # dpdp-integration-test-suite/scripts/enable-webhook-callbacks.sh. That script is
       # not in the repository, so the step is omitted rather than carried as a guaranteed
       # failure. Nothing is lost today: it flips allow_private_network_callback_targets for
       # tests/08-event-notifications, whose webhook specs are test.skip'd in source and also

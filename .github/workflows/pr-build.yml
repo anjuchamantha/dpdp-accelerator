@@ -81,7 +81,7 @@ jobs:
   #     friends) needing real code changes, and CLAUDE.md forbids disabling the
   #     rules to paper over them.
   #
-  # Both are tracked as follow-ups; add the steps in the change that fixes them.
+  # Both are tracked in #81; add the steps in the change that fixes them.
   frontend-quality:
     name: Frontend quality
     runs-on: ubuntu-latest

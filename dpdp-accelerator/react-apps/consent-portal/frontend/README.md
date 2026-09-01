@@ -147,8 +147,10 @@ repository root.
 
 ## CI
 
-`.github/workflows/pr-checks.yml` builds the whole accelerator (including this frontend, via
-`mvn clean install` from the repository root) on every pull request to `main` and `dev`.
+`.github/workflows/pr-build.yml` builds the whole accelerator (including this frontend, via
+`mvn clean install` from the repository root) on every pull request to `main` and `dev`. That
+build runs the Vitest suite too, since it is bound to the Maven test phase. The same workflow's
+`Frontend quality` job checks Prettier formatting; `npm run lint` is not enforced yet.
 
 ## AI Instructions
 

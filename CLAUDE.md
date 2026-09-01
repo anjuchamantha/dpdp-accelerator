@@ -38,11 +38,14 @@ Output: `dpdp-accelerator/accelerators/dpdp-is/target/wso2-dpdp-is-accelerator-<
 | Frontend lint / format | `npm run lint` / `npm run format:check` |
 | E2E (Playwright, needs a deployed IS) | `cd dpdp-integration-test-suite && ./run-e2e.sh [tests/03-consents]` |
 
-CI runs the Java/frontend build and the full E2E suite on every PR to `main` and `dev` via
-`.github/workflows/pr-checks.yml`, which deploys a fresh IS 7.3.0 from scratch. It needs no
-secrets. Role *membership* is the one thing the accelerator never provisions, so both CI and a
-fresh local install get their accounts from
-`dpdp-integration-test-suite/scripts/provision-test-users.sh` (idempotent).
+CI splits into three workflows. `.github/workflows/pr-build.yml` builds the Java and frontend
+modules on every PR to `main` and `dev`. The E2E suite is not automatic: `pr-e2e.yml` deploys an
+Identity Server from scratch and runs Playwright against it only once a maintainer applies the
+`Action/trigger-e2e` label, because the job runs PR code with write permissions and repository
+secrets in scope. `pr-e2e-gate.yml` strips that label on every new push and publishes the
+`E2E gate` commit status, so the label can never carry over to unreviewed code. Role *membership*
+is the one thing the accelerator never provisions, so both CI and a fresh local install get their
+accounts from `dpdp-integration-test-suite/scripts/provision-test-users.sh` (idempotent).
 
 **Use npm, not pnpm.** `package-lock.json` is the committed lockfile and the Maven build invokes
 `npm install` / `npm run build`. The frontend `README.md` and `AGENTS.md` both say pnpm — they are
@@ -50,7 +53,10 @@ stale on this point; don't follow them for package management even though they'r
 canonical frontend policy (see [Frontend conventions](#frontend-conventions) below).
 
 `npm run build` is not just Vite: it chains `tsc -b`, then `security:verify`, `i18n:verify`, and
-`generate:shell`. Any of those four can fail the Maven build.
+`generate:shell`. Any of those four can fail the Maven build. The Vitest suite is bound to the
+Maven `test` phase separately, so `mvn install` runs it too and `-DskipTests` skips it alongside
+the Java tests. Prettier and ESLint are *not* in the Maven build - CI checks formatting in a
+separate job.
 
 ## Architecture
 

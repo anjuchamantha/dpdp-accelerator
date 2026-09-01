@@ -60,9 +60,11 @@ unconfigured Identity Server.
 
 ## Continuous integration
 
-`.github/workflows/pr-checks.yml` runs this suite against a freshly deployed Identity Server on
-every pull request to `main` and `dev`, and can be dispatched manually from the Actions tab. It
-performs the same steps as the setup above, so a change that breaks local setup breaks CI too.
+`.github/workflows/pr-e2e.yml` runs this suite against a freshly deployed Identity Server, and can
+be dispatched manually from the Actions tab. On a pull request it is not automatic: a maintainer
+applies the `Action/trigger-e2e` label after reviewing the diff, and the label is stripped again on
+every new push. It performs the same steps as the setup above, so a change that breaks local setup
+breaks CI too.
 
 ## Running the tests
 
