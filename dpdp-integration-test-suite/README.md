@@ -153,3 +153,5 @@ persistent, shared environment rather than a disposable one:
   over time (see [Operating principles](#operating-principles)).
 
 
+
+<!-- CI verification scratch line - do not merge. -->
