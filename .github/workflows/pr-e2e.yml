@@ -17,11 +17,13 @@
 # The secret-bearing E2E path. Triggers:
 #
 #   - pull_request_target [labeled]: runs only once a maintainer applies
-#     Action/trigger-e2e, having reviewed the diff. That review is what makes it
-#     acceptable to run possibly-fork-supplied code with real WSO2 subscription
-#     credentials, which plain `pull_request` never exposes to a fork.
-#     pr-e2e-gate.yml strips the label on every subsequent push, so an approval
-#     cannot carry over to code nobody looked at.
+#     Action/trigger-e2e, having reviewed the diff. pull_request_target runs with
+#     the base repository's write-capable GITHUB_TOKEN and its cache scope, so
+#     executing PR code under it is the classic "pwn request" exposure - the review
+#     is what makes that acceptable. pr-e2e-gate.yml strips the label on every
+#     subsequent push, so an approval cannot carry over to code nobody looked at.
+#     (Subscription secrets are deliberately *not* passed on this path - see the
+#     secrets block below.)
 #   - workflow_dispatch: manual and already authenticated, so no label needed.
 #     It is also the only way to pick `is_source: release` (a GA pack plus U2
 #     updates); labelled PR runs always build product-is from master, which
@@ -45,10 +47,20 @@ on:
         options: [release, master]
         default: release
 
-# Must stay identical to pr-e2e-gate.yml's group so a new push cancels an E2E
-# run already in flight against the commit it supersedes.
+# A genuine E2E run shares pr-e2e-gate.yml's group, so a new push cancels a run
+# against the commit it supersedes.
+#
+# A run created by some *other* label must not join that group. Concurrency is a
+# run-level property, evaluated before any job's `if:`, so a run that is going to
+# skip both its jobs would still cancel a legitimate E2E already in flight -
+# labelling a PR `documentation` mid-run would kill its E2E and leave the gate
+# status pending for good. Those runs therefore get a throwaway group of their own,
+# keyed on run_id so they neither cancel nor queue behind anything.
 concurrency:
-  group: pr-e2e-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ${{ (github.event_name == 'workflow_dispatch' || github.event.label.name == 'Action/trigger-e2e')
+        && format('pr-e2e-{0}', github.event.pull_request.number || github.ref)
+        || format('pr-e2e-ignored-label-{0}', github.run_id) }}
   cancel-in-progress: true
 
 permissions:
@@ -66,12 +78,25 @@ jobs:
       expected_head_sha: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
       is_source: ${{ github.event_name == 'workflow_dispatch' && inputs.is_source || 'master' }}
       allow_unsafe_pr_checkout: ${{ github.event_name == 'pull_request_target' }}
-    secrets: inherit
+    # Not `inherit`. A labelled PR run always builds product-is from master, and
+    # every consumer of these three in e2e.yml is gated on is_source == 'release',
+    # so a PR run has no use for them - and PR runs are exactly the ones executing
+    # code that may have come from a fork. They are passed only on a manual
+    # dispatch, which is the only way to select the release+U2 path.
+    secrets:
+      SOLUTIONS_BOT_EMAIL: ${{ github.event_name == 'workflow_dispatch' && secrets.SOLUTIONS_BOT_EMAIL || '' }}
+      SOLUTIONS_BOT_U2_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && secrets.SOLUTIONS_BOT_U2_PASSWORD || '' }}
+      WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE: ${{ github.event_name == 'workflow_dispatch' && secrets.WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE || '' }}
 
-  # Flips the "E2E gate" status pr-e2e-gate.yml set to pending. Skipped when the
-  # run was cancelled, because that only happens when a newer push has already
-  # re-pended the gate on its own head commit - writing to the superseded SHA
-  # would just be noise.
+  # Flips the "E2E gate" status pr-e2e-gate.yml set to pending, on the head SHA the
+  # label event carried.
+  #
+  # Cancelled runs are skipped: a cancellation means a newer push has already
+  # re-pended the gate on its own head commit, so writing to the superseded SHA
+  # would just be noise. That does not cover every stale write - if e2e.yml's
+  # merge-ref guard fails because the PR moved, the result is `failure`, not
+  # `cancelled`, and a failure lands on the by-then-superseded commit. Harmless,
+  # since the gate run for the new head publishes its own pending status.
   report:
     name: Report E2E gate
     needs: e2e

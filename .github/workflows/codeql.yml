@@ -52,6 +52,9 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      # Not needed while the repository is public, but code scanning requires it if
+      # it is ever made private - cheaper to carry than to debug later.
+      actions: read
     strategy:
       # One language failing should not hide the other's findings.
       fail-fast: false

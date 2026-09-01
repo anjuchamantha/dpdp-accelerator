@@ -51,7 +51,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      npm-minor-patch:
+      frontend-npm-minor-patch:
         update-types: [minor, patch]
 
   - package-ecosystem: npm
@@ -60,5 +60,5 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      npm-minor-patch:
+      test-suite-npm-minor-patch:
         update-types: [minor, patch]
