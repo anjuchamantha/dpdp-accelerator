@@ -15,9 +15,8 @@
 # under the License.
 
 # Deploys a fresh Identity Server, applies the accelerator to it and runs the Playwright
-# suite against it. Reusable so `pr-checks.yml` (label-gated PR runs) and
-# `release-builder.yml` (release gate) exercise exactly the same path - the job body is
-# kept as a straight lift of what pr-checks.yml used to run inline.
+# suite against it. Reusable so `pr-e2e.yml` (label-gated PR runs) and
+# `release-builder.yml` (release gate) exercise exactly the same path.
 name: E2E integration tests
 
 on:
@@ -25,6 +24,15 @@ on:
     inputs:
       ref:
         description: Ref or SHA to check out. Empty means the ref that triggered the caller.
+        required: false
+        type: string
+        default: ''
+      expected_head_sha:
+        description: >-
+          When `ref` is a PR merge ref: the PR head commit the maintainer actually
+          reviewed and labelled. The job fails if the merge ref turns out to carry a
+          different one, i.e. the PR moved after the label was applied. Empty skips
+          the check.
         required: false
         type: string
         default: ''
@@ -56,9 +64,10 @@ jobs:
   e2e:
     name: E2E integration tests
     runs-on: ubuntu-latest
-    # Generous enough to cover the rare, manually-chosen product-is master build
-    # (large multi-module reactor, even with tests/checks skipped) plus one
-    # provisioning restart. The default release+U2 path finishes in a fraction of this.
+    # Generous enough to cover the product-is master build - the default for both
+    # labelled PR runs and the release gate - which is a large multi-module reactor
+    # even with tests and checks skipped, plus one provisioning restart. The
+    # manually-selected release+U2 path finishes in a fraction of this.
     timeout-minutes: 110
     env:
       IS_BASE_URL: https://localhost:9443
@@ -69,21 +78,47 @@ jobs:
       IS_SOURCE: ${{ inputs.is_source }}
     steps:
       # pull_request_target checks out the TARGET branch by default, which would
-      # silently test the wrong code - explicitly pin to the PR's own head commit. A
-      # plain workflow_dispatch run has no pull_request context, so it falls back to
-      # whatever ref triggered it (actions/checkout's own default).
+      # silently test the wrong code. Callers therefore pass an explicit ref:
+      # pr-e2e.yml passes refs/pull/N/merge, so E2E exercises the PR merged onto the
+      # current base rather than the branch tip - a PR can be green in isolation and
+      # still break the base on merge. A plain workflow_dispatch run has no
+      # pull_request context and falls back to whatever ref triggered it
+      # (actions/checkout's own default).
       #
-      # allow-unsafe-pr-checkout is required because that head commit can belong to a
-      # fork - actions/checkout otherwise refuses to fetch fork code into a
+      # fetch-depth 2 is what makes the merge ref's parents resolvable for the guard
+      # step below; the default depth-1 clone has no second parent to compare.
+      #
+      # allow-unsafe-pr-checkout is required because that merge ref can contain fork
+      # code - actions/checkout otherwise refuses to fetch it into a
       # pull_request_target run (the "pwn request" guard). Safe here specifically
       # because this job only runs after a maintainer has reviewed the diff and
-      # applied the Action/trigger-e2e label (see the trigger comment above and
-      # `reset-e2e-label-on-push` below) - same pattern FS Accelerator's maven.yml uses.
+      # applied the Action/trigger-e2e label (see pr-e2e.yml's trigger comment and
+      # pr-e2e-gate.yml) - the same pattern FS Accelerator's maven.yml uses.
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: ${{ inputs.expected_head_sha != '' && 2 || 1 }}
           allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
           persist-credentials: false
+
+      # refs/pull/N/merge is re-resolved by GitHub whenever the PR moves, and the
+      # label authorised one specific head commit. If the author pushed in the window
+      # between the label event and this checkout - before pr-e2e-gate.yml's own run
+      # stripped the label - the merge ref would already contain unreviewed code.
+      # Refuse to run it with credentials attached.
+      - name: Verify the merge ref carries the labelled head commit
+        if: inputs.expected_head_sha != ''
+        env:
+          EXPECTED: ${{ inputs.expected_head_sha }}
+        run: |
+          actual=$(git rev-parse HEAD^2)
+          if [ "${actual}" != "${EXPECTED}" ]; then
+            echo "::error::The PR moved after Action/trigger-e2e was applied (labelled" \
+                 "${EXPECTED}, merge ref now carries ${actual}). Re-review the diff and" \
+                 "re-apply the label."
+            exit 1
+          fi
+          echo "Merge ref second parent matches the labelled head ${EXPECTED}."
 
       - uses: actions/setup-java@v5
         with:
@@ -93,13 +128,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: dpdp-integration-test-suite/package-lock.json
 
-      # No artifact download from `build`: that job only runs under `pull_request`,
-      # which never fires in the same workflow run as `pull_request_target` or
-      # `workflow_dispatch` - there is nothing to download here, so this job builds
-      # the accelerator itself.
+      # No artifact reuse from the PR build: that job lives in pr-build.yml under a
+      # different event, so its run never overlaps this one and there is nothing to
+      # download. This job builds the accelerator itself.
       - name: Build the accelerator
-        run: mvn -B clean install
+        run: mvn -B -ntp clean install
         env:
           MAVEN_OPTS: -Xmx4g
 
@@ -126,8 +162,8 @@ jobs:
           # startup error.
           echo "$(cut -d' ' -f1 wso2is.sha256)  wso2is.zip" | sha256sum -c -
 
-      # Only relevant for the manually-dispatched master build; harmless dead weight
-      # otherwise since the step it guards never runs on the default path.
+      # Only relevant for the master build, which is what labelled PR runs and the
+      # release gate use; harmless dead weight on a manually-selected release run.
       - name: Cache Maven repo for the product-is build
         if: env.IS_SOURCE == 'master'
         uses: actions/cache@v4
@@ -250,7 +286,7 @@ jobs:
               | python3 -c 'import json, sys; print(json.load(sys.stdin).get("totalResults", 0))'
           }
           wait_for_is() {
-            for i in $(seq 1 60); do
+            for _ in $(seq 1 60); do
               curl -sk -o /dev/null -f "${IS_BASE_URL}/oauth2/jwks" && return 0
               sleep 5
             done
@@ -339,14 +375,6 @@ jobs:
         run: |
           "${IS_HOME}/bin/wso2server.sh" stop || true
 
-  # `e2e` itself cannot be the required status check: a job skipped by its own `if:`
-  # (which is what happens on every pull_request_target event until someone applies
-  # Action/trigger-e2e) reports a "skipped" conclusion, and GitHub's branch-protection
-  # rulesets treat "skipped" as satisfying a required check - so marking `e2e` required
-  # would let every PR merge without it ever having run. This job exists purely to be
-  # the thing a ruleset actually requires: it always runs on pull_request_target
-  # (`if: always()` so a skipped `e2e` doesn't skip this too) and fails unless `e2e`
-  # itself reports success, so it's red until the label is applied and E2E passes.
-  #
-  # This job must be selected as the required status check for `main` in Settings ->
-  # Rules -> Rulesets - that repo-admin step can't be done from this workflow file.
+# The required-check side of this lives in pr-e2e-gate.yml and pr-e2e.yml, which
+# publish the result as the overwritable "E2E gate" commit status rather than as a
+# check run per workflow run.
