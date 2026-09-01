@@ -1,0 +1,107 @@
+# Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Build-and-unit-test gate for every PR. Runs under plain `pull_request` only -
+# fork-safe (no secrets, read-only token) and always on. The E2E side lives in
+# pr-e2e-gate.yml / pr-e2e.yml under pull_request_target; keeping the two event
+# types in separate files is what stops every push from littering the PR with
+# "skipped" check runs for the other trigger's jobs (the previous single
+# pr-checks.yml carried both triggers and reported all four of its jobs on every
+# one of the three runs a labelled push produced).
+#
+# `pull_request` checks out the merge ref (the PR merged onto the current base)
+# by default, so these jobs test the merge result rather than the branch tip.
+name: PR build
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dpdp-accelerator/react-apps/consent-portal/frontend/package-lock.json
+
+      # Runs the Java unit tests and their jacoco gates, the frontend
+      # tsc/security:verify/i18n:verify chain, and the frontend Vitest suite
+      # (bound to the Maven test phase in the consent-portal pom).
+      - name: Build
+        run: mvn -B -ntp clean install
+        env:
+          MAVEN_OPTS: -Xmx4g
+
+  # Style-only checks, deliberately outside the Maven build so a formatting nit
+  # never blocks a local `mvn install`.
+  #
+  # Two things this job does NOT do yet, both because the tree cannot pass them
+  # today and a permanently-red check is worse than no check:
+  #
+  #   - `npm ci` instead of `npm install`, which would additionally catch
+  #     package.json / package-lock.json drift. The committed lockfile has no
+  #     esbuild entries at all (vite 7.3.5 needs it, and package.json overrides
+  #     it to 0.28.1 for a CVE), so `npm ci` fails outright on it.
+  #   - `npm run lint`. There are 23 pre-existing ESLint violations
+  #     (react/require-default-props, class-methods-use-this, react-hooks and
+  #     friends) needing real code changes, and CLAUDE.md forbids disabling the
+  #     rules to paper over them.
+  #
+  # Both are tracked as follow-ups; add the steps in the change that fixes them.
+  frontend-quality:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dpdp-accelerator/react-apps/consent-portal/frontend
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dpdp-accelerator/react-apps/consent-portal/frontend/package-lock.json
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Format check
+        run: npm run format:check
