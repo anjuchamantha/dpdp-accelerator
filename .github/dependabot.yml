@@ -1,0 +1,64 @@
+# Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Weekly, grouped updates. Grouping matters here because every PR raised costs a
+# full build - and, if a maintainer labels it, an E2E run - so one PR per
+# dependency would swamp the runners.
+#
+# Version updates need no repository setting; Dependabot alerts and security
+# updates are separate admin toggles, tracked in #80.
+version: 2
+updates:
+  # Keeps the SHA pins in .github/workflows current: Dependabot rewrites the SHA
+  # and the trailing version comment together, which is the only maintainable way
+  # to run pinned actions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # The root pom is the only place versions are declared, so this covers every
+  # module in the reactor. Majors are left out of the group deliberately - a major
+  # bump of an IS-facing dependency needs reviewing on its own.
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      maven-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /dpdp-accelerator/react-apps/consent-portal/frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /dpdp-integration-test-suite
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
