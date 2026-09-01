@@ -632,5 +632,11 @@
         <dpdp.dto.codegen.skip>true</dpdp.dto.codegen.skip>
 
         <npm.executable>npm</npm.executable>
+
+        <!-- Surefire reads this natively; the consent-portal pom's npm-test execution
+             reads it too, so -DskipTests skips the frontend Vitest suite along with the
+             Java tests. Needs an explicit default or the property stays unresolved and
+             fails exec-maven-plugin's boolean conversion. -->
+        <skipTests>false</skipTests>
     </properties>
 </project>
