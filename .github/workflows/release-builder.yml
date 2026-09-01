@@ -161,9 +161,11 @@ jobs:
             echo "| Dry run | \`${{ inputs.dry_run }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Gates the release on the same suite that gates a PR - see e2e.yml.
+  # Gates the release on the same suite that gates a PR - see e2e.yml. Named
+  # distinctly from the PR workflows' "E2E gate" commit status so that selecting
+  # required checks by name cannot confuse the two.
   e2e:
-    name: E2E gate
+    name: E2E release gate
     needs: prepare
     if: ${{ inputs.run_e2e }}
     uses: ./.github/workflows/e2e.yml
