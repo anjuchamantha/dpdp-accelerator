@@ -174,9 +174,7 @@ export default function EventDetailsModal({
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     <strong>{historyData.completionStatus}</strong>
-                    {historyData.completionEvidence
-                      ? ` — ${historyData.completionEvidence}`
-                      : ''}
+                    {historyData.completionEvidence ? ` — ${historyData.completionEvidence}` : ''}
                   </Typography>
                 </Box>
               ) : null}

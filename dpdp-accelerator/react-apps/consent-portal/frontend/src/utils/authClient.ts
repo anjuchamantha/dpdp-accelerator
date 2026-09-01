@@ -25,7 +25,13 @@ import {
 } from '@asgardeo/auth-spa'
 
 import { runtimeBasePath, serverBaseUrl } from './basePath'
-import { ACCOUNT_SCOPES, COMPLAINT_SCOPES, CONSENT_HISTORY_SCOPES, EVENT_SCOPES, IS_SCOPES } from './scopes'
+import {
+  ACCOUNT_SCOPES,
+  COMPLAINT_SCOPES,
+  CONSENT_HISTORY_SCOPES,
+  EVENT_SCOPES,
+  IS_SCOPES,
+} from './scopes'
 
 /**
  * OIDC authentication for the portal, the way the Identity Server's own SPAs

@@ -106,8 +106,14 @@ async function main() {
     throw new Error(`no built shell at ${shellPath}; run vite build first`)
   }
 
-  await writeFile(path.join(distDir, 'index.jsp'), `${JSP_PAGE_DIRECTIVE}\n${FORWARD_AUTH_CODE}\n${shell}`)
-  await writeFile(path.join(distDir, 'home.jsp'), `${JSP_PAGE_DIRECTIVE}\n${STORE_AUTH_CODE}\n${shell}`)
+  await writeFile(
+    path.join(distDir, 'index.jsp'),
+    `${JSP_PAGE_DIRECTIVE}\n${FORWARD_AUTH_CODE}\n${shell}`,
+  )
+  await writeFile(
+    path.join(distDir, 'home.jsp'),
+    `${JSP_PAGE_DIRECTIVE}\n${STORE_AUTH_CODE}\n${shell}`,
+  )
   await writeFile(path.join(distDir, 'auth.jsp'), AUTH_ENDPOINT)
 
   // Tomcat's welcome-file list would otherwise serve index.html at the context

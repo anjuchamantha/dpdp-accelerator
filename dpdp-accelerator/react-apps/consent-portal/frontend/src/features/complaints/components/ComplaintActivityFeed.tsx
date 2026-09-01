@@ -355,7 +355,12 @@ function ComplaintActivityFeed({
             {entry.attachments && entry.attachments.length > 0 ? (
               <Stack spacing={1} sx={{ mt: 1 }}>
                 <Divider />
-                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ color: 'text.secondary' }}>
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  alignItems="center"
+                  sx={{ color: 'text.secondary' }}
+                >
                   <Paperclip size={13} style={{ flexShrink: 0 }} />
                   <Typography variant="caption" color="inherit">
                     {t('complaints.attachments.uploadedCount', { count: entry.attachments.length })}

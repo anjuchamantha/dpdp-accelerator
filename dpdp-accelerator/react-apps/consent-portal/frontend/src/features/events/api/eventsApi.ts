@@ -16,7 +16,12 @@
  * under the License.
  */
 
-import type { EventInput, EventListQueryParams, EventListResponse, EventRecord } from '../../../types/event'
+import type {
+  EventInput,
+  EventListQueryParams,
+  EventListResponse,
+  EventRecord,
+} from '../../../types/event'
 import type { SubscriptionEventHistoryRecord } from '../../../types/subscription'
 import { apiRequest } from '../../../utils/apiClient'
 
@@ -50,9 +55,12 @@ export async function fetchEventDeliveryHistory(
 }
 
 export async function fetchEventById(eventId: string): Promise<EventRecord> {
-  return apiRequest<EventRecord>(`/api/dpdp/event-notifications/v1/events/${encodeURIComponent(eventId)}`, {
-    method: 'GET',
-  })
+  return apiRequest<EventRecord>(
+    `/api/dpdp/event-notifications/v1/events/${encodeURIComponent(eventId)}`,
+    {
+      method: 'GET',
+    },
+  )
 }
 
 export async function fetchEventDeliveries(

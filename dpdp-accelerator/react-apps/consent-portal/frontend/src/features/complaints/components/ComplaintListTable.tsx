@@ -159,7 +159,9 @@ export default function ComplaintListTable({
                   <TableCell>
                     <ComplaintStatusChip status={row.status} viewerRole="DataPrincipal" />
                   </TableCell>
-                  <TableCell>{formatEpochTimestamp(row.submittedAt, DATE_FORMAT_OPTIONS)}</TableCell>
+                  <TableCell>
+                    {formatEpochTimestamp(row.submittedAt, DATE_FORMAT_OPTIONS)}
+                  </TableCell>
                   <TableCell>{formatEpochTimestamp(row.updatedAt, DATE_FORMAT_OPTIONS)}</TableCell>
                 </TableRow>
               ))

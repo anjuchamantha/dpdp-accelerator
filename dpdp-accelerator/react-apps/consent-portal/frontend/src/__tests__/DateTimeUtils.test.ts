@@ -78,8 +78,13 @@ describe('formatEpochTimestamp', () => {
     expect(formatEpochTimestamp(isoDateTime, DATE_TIME_FORMAT_OPTIONS, 'en-US')).toBe(expected)
 
     const epochInSecondsString = '1710000000'
-    const expectedFromSec = new Date(1710000000 * 1000).toLocaleString('en-US', DATE_TIME_FORMAT_OPTIONS)
-    expect(formatEpochTimestamp(epochInSecondsString, DATE_TIME_FORMAT_OPTIONS, 'en-US')).toBe(expectedFromSec)
+    const expectedFromSec = new Date(1710000000 * 1000).toLocaleString(
+      'en-US',
+      DATE_TIME_FORMAT_OPTIONS,
+    )
+    expect(formatEpochTimestamp(epochInSecondsString, DATE_TIME_FORMAT_OPTIONS, 'en-US')).toBe(
+      expectedFromSec,
+    )
   })
 
   it('formats epoch seconds using locale and options', () => {

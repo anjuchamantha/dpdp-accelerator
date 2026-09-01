@@ -92,9 +92,7 @@ export default function SubscriptionFilters({
         size="small"
         label={t('subscriptions.filters.status')}
         value={status}
-        onChange={(event) =>
-          handleStatusChange(event.target.value as 'All' | SubscriptionStatus)
-        }
+        onChange={(event) => handleStatusChange(event.target.value as 'All' | SubscriptionStatus)}
         sx={{ minWidth: 150 }}
       >
         <MenuItem value="All">{t('subscriptions.filters.allStatuses')}</MenuItem>
@@ -110,9 +108,7 @@ export default function SubscriptionFilters({
         size="small"
         label={t('subscriptions.filters.deliveryMode')}
         value={deliveryMode}
-        onChange={(event) =>
-          handleDeliveryModeChange(event.target.value as 'All' | DeliveryMode)
-        }
+        onChange={(event) => handleDeliveryModeChange(event.target.value as 'All' | DeliveryMode)}
         sx={{ minWidth: 150 }}
       >
         <MenuItem value="All">{t('subscriptions.filters.allModes')}</MenuItem>

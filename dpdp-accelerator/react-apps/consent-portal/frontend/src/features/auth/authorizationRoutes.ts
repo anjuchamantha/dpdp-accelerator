@@ -23,7 +23,7 @@ const AUTHORIZED_DESTINATIONS: ReadonlyArray<{ path: string; requirement: ScopeR
   { path: '/consents', requirement: REQUIRED_SCOPES.CONSENTS_READ_SELF },
   { path: '/purposes', requirement: REQUIRED_SCOPES.PURPOSES_READ },
   { path: '/elements', requirement: REQUIRED_SCOPES.ELEMENTS_READ },
-    { path: '/events', requirement: REQUIRED_SCOPES.EVENTS_READ },
+  { path: '/events', requirement: REQUIRED_SCOPES.EVENTS_READ },
   { path: '/events/topics', requirement: REQUIRED_SCOPES.EVENT_TOPICS_READ },
   { path: '/events/subscriptions', requirement: REQUIRED_SCOPES.EVENT_SUBSCRIPTIONS_READ },
   { path: '/administration/consents', requirement: REQUIRED_SCOPES.CONSENTS_READ_ANY },

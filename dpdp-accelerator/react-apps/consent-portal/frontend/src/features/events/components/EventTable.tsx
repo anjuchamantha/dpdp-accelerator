@@ -153,7 +153,11 @@ export default function EventTable({
                         ))}
                       </Box>
                     ) : (
-                      <Chip size="small" variant="outlined" label={t('events.purposes.all', 'ALL')} />
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={t('events.purposes.all', 'ALL')}
+                      />
                     )}
                   </TableCell>
                   <TableCell>

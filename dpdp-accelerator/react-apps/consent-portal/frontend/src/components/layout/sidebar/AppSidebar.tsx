@@ -220,7 +220,6 @@ function AppSidebar({ collapsed }: AppSidebarProps): React.JSX.Element {
     ...administrationItems,
   ]
 
-
   const activeItem = mapPathToMenuId(location.pathname, location.search)
 
   return (
@@ -261,14 +260,14 @@ function AppSidebar({ collapsed }: AppSidebarProps): React.JSX.Element {
         ) : null}
 
         {complaintItems.length > 0 ? (
-            <Sidebar.Category>
-              {complaintItems.map((item) => (
-                  <Sidebar.Item key={item.id} id={item.id}>
-                    <Sidebar.ItemIcon>{item.icon}</Sidebar.ItemIcon>
-                    <Sidebar.ItemLabel>{t(item.labelKey)}</Sidebar.ItemLabel>
-                  </Sidebar.Item>
-              ))}
-            </Sidebar.Category>
+          <Sidebar.Category>
+            {complaintItems.map((item) => (
+              <Sidebar.Item key={item.id} id={item.id}>
+                <Sidebar.ItemIcon>{item.icon}</Sidebar.ItemIcon>
+                <Sidebar.ItemLabel>{t(item.labelKey)}</Sidebar.ItemLabel>
+              </Sidebar.Item>
+            ))}
+          </Sidebar.Category>
         ) : null}
 
         {eventItems.length > 0 ? (

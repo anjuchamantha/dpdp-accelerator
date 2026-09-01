@@ -34,7 +34,7 @@ export const IS_SCOPES = {
   PURPOSE_DELETE: 'internal_consent_mgt_purpose_delete',
   ELEMENT_VIEW: 'internal_consent_mgt_element_view',
   ELEMENT_CREATE: 'internal_consent_mgt_element_create',
-  ELEMENT_DELETE: 'internal_consent_mgt_element_delete'
+  ELEMENT_DELETE: 'internal_consent_mgt_element_delete',
 } as const
 
 export const COMPLAINT_SCOPES = {

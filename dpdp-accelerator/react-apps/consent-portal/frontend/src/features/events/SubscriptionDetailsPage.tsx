@@ -118,10 +118,14 @@ export default function SubscriptionDetailsPage(): React.JSX.Element {
     if (!sub) return
     verifyMutation.mutate(sub.subscriptionId, {
       onSuccess: () => {
-        setSnackbarMessage(t('subscriptions.verification.success', 'Verification triggered successfully.'))
+        setSnackbarMessage(
+          t('subscriptions.verification.success', 'Verification triggered successfully.'),
+        )
       },
       onError: (err) => {
-        setSnackbarMessage(err.message || t('subscriptions.verification.failed', 'Verification failed.'))
+        setSnackbarMessage(
+          err.message || t('subscriptions.verification.failed', 'Verification failed.'),
+        )
       },
     })
   }

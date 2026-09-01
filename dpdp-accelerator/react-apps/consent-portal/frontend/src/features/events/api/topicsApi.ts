@@ -16,7 +16,12 @@
  * under the License.
  */
 
-import type { TopicInput, TopicListQueryParams, TopicListResponse, TopicRecord } from '../../../types/topic'
+import type {
+  TopicInput,
+  TopicListQueryParams,
+  TopicListResponse,
+  TopicRecord,
+} from '../../../types/topic'
 import { apiRequest } from '../../../utils/apiClient'
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
@@ -43,7 +48,10 @@ export async function createTopic(payload: TopicInput): Promise<TopicRecord> {
 }
 
 export async function deleteTopic(topicId: string): Promise<TopicRecord> {
-  return apiRequest<TopicRecord>(`/api/dpdp/event-notifications/v1/topics/${encodeURIComponent(topicId)}`, {
-    method: 'DELETE',
-  })
+  return apiRequest<TopicRecord>(
+    `/api/dpdp/event-notifications/v1/topics/${encodeURIComponent(topicId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
 }

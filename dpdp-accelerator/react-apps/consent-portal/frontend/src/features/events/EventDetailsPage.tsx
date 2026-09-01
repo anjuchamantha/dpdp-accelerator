@@ -90,7 +90,8 @@ export default function EventDetailsPage(): React.JSX.Element {
 
   const event = eventQuery.data
   const deliveries = deliveriesQuery.data?.rows ?? []
-  const totalDeliveriesCount = deliveriesQuery.data?.total ?? (event?.deliveriesCount ?? deliveries.length)
+  const totalDeliveriesCount =
+    deliveriesQuery.data?.total ?? event?.deliveriesCount ?? deliveries.length
 
   const handleCopyPayload = async (rawPayload?: string) => {
     const formatted = formatJsonPayload(rawPayload)
@@ -100,7 +101,9 @@ export default function EventDetailsPage(): React.JSX.Element {
       setSnackbarMessage(t('events.details.copyPayloadSuccess'))
     } catch {
       setSnackbarSeverity('error')
-      setSnackbarMessage(t('events.details.copyPayloadFailed', 'Failed to copy payload to clipboard.'))
+      setSnackbarMessage(
+        t('events.details.copyPayloadFailed', 'Failed to copy payload to clipboard.'),
+      )
     }
   }
 
@@ -160,20 +163,25 @@ export default function EventDetailsPage(): React.JSX.Element {
     {
       icon: <Layers size={16} />,
       label: t('events.table.topic'),
-      value: <Typography variant="body2" sx={{ fontWeight: 600 }}>{displayTopic}</Typography>,
+      value: (
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {displayTopic}
+        </Typography>
+      ),
     },
     {
       icon: <Users size={16} />,
       label: t('events.table.purposes'),
-      value: purposes.length > 0 ? (
-        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-          {purposes.map((p) => (
-            <Chip key={p} size="small" variant="outlined" label={p} />
-          ))}
-        </Box>
-      ) : (
-        <Chip size="small" variant="outlined" label={t('events.details.allPurposes')} />
-      ),
+      value:
+        purposes.length > 0 ? (
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+            {purposes.map((p) => (
+              <Chip key={p} size="small" variant="outlined" label={p} />
+            ))}
+          </Box>
+        ) : (
+          <Chip size="small" variant="outlined" label={t('events.details.allPurposes')} />
+        ),
     },
     {
       icon: <Clock3 size={16} />,
@@ -324,13 +332,17 @@ export default function EventDetailsPage(): React.JSX.Element {
                     '& .MuiTableCell-head': {
                       fontWeight: 600,
                       ...theme.applyStyles('light', { backgroundColor: theme.palette.grey[50] }),
-                      ...theme.applyStyles('dark', { backgroundColor: 'rgba(255, 255, 255, 0.04)' }),
+                      ...theme.applyStyles('dark', {
+                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      }),
                     },
                   })}
                 >
                   <TableRow>
                     <TableCell>{t('events.table.deliveryId')}</TableCell>
-                    <TableCell>{t('subscriptions.table.subscriptionId', 'Subscription ID')}</TableCell>
+                    <TableCell>
+                      {t('subscriptions.table.subscriptionId', 'Subscription ID')}
+                    </TableCell>
                     <TableCell>{t('events.table.mode')}</TableCell>
                     <TableCell>{t('events.table.status')}</TableCell>
                     <TableCell>{t('events.table.occurredAt')}</TableCell>
@@ -349,10 +361,18 @@ export default function EventDetailsPage(): React.JSX.Element {
                         onClick={() => setSelectedDelivery(del)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <CopyableText value={del.deliveryId || del.eventId} truncateAt={14} monospace />
+                          <CopyableText
+                            value={del.deliveryId || del.eventId}
+                            truncateAt={14}
+                            monospace
+                          />
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <CopyableText value={del.subscriptionId || '-'} truncateAt={14} monospace />
+                          <CopyableText
+                            value={del.subscriptionId || '-'}
+                            truncateAt={14}
+                            monospace
+                          />
                         </TableCell>
                         <TableCell>
                           <Chip size="small" variant="outlined" label={mode} />
@@ -364,7 +384,9 @@ export default function EventDetailsPage(): React.JSX.Element {
                             color={getSubscriptionStatusChipColor(status)}
                           />
                         </TableCell>
-                        <TableCell>{formatEpochTimestamp(del.occurredAt || event.occurredAt)}</TableCell>
+                        <TableCell>
+                          {formatEpochTimestamp(del.occurredAt || event.occurredAt)}
+                        </TableCell>
                         <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                           <Tooltip title={t('events.actions.view')}>
                             <span>

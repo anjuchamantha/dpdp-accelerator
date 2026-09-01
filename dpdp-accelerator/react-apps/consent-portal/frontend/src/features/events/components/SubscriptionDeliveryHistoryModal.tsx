@@ -94,9 +94,7 @@ export default function SubscriptionDeliveryHistoryModal({
             <CircularProgress size={32} />
           </Box>
         ) : historyQuery.isError || !historyData ? (
-          <Alert severity="error">
-            {t('subscriptions.deliveryHistory.loadFailed')}
-          </Alert>
+          <Alert severity="error">{t('subscriptions.deliveryHistory.loadFailed')}</Alert>
         ) : (
           <Stack spacing={2} sx={{ mt: 1 }}>
             {historyData.completionStatus ? (
@@ -127,7 +125,9 @@ export default function SubscriptionDeliveryHistoryModal({
                       '& .MuiTableCell-head': {
                         fontWeight: 600,
                         ...theme.applyStyles('light', { backgroundColor: theme.palette.grey[100] }),
-                        ...theme.applyStyles('dark', { backgroundColor: 'rgba(255, 255, 255, 0.08)' }),
+                        ...theme.applyStyles('dark', {
+                          backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                        }),
                       },
                     })}
                   >
