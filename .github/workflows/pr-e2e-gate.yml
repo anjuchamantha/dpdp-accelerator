@@ -1,0 +1,93 @@
+# Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Runs on every open/push/reopen of a PR (pull_request_target, so it fires for
+# forks too and has the write permissions the two duties below need):
+#
+#   1. Strip a stale Action/trigger-e2e label. A label applied to reviewed
+#      commit A must never keep authorising secret-bearing E2E runs against
+#      whatever commit B replaces it with.
+#   2. Set the "E2E gate" commit status to pending on the new head commit.
+#      pr-e2e.yml flips that same context to success or failure once a labelled
+#      run finishes.
+#
+# Why a commit status rather than a job: a status is keyed by its context
+# string, so writing it again overwrites what the PR displays. A check run
+# cannot be overwritten - each workflow run creates its own, they all stay
+# visible, and a job disabled by its own `if:` still publishes a "skipped" one.
+# That is what produced the wall of skipped and stale-red E2E entries the
+# previous pr-checks.yml left on every PR. It is also why the old
+# `e2e-required` job existed: rulesets treat a skipped required check as
+# satisfied, so a skipped `e2e` job could never have gated anything. A pending
+# status has no such loophole, which makes "E2E gate" directly usable as a
+# required status check.
+#
+# This workflow never checks out the PR's code, which is what makes it safe
+# under pull_request_target.
+name: PR E2E gate
+
+on:
+  pull_request_target:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+
+# Shared with pr-e2e.yml (keyed by PR number, not github.ref - under
+# pull_request_target github.ref is the *base* branch, which used to put every
+# PR targeting main into one group where they cancelled each other's runs). A
+# push while E2E is running against the previous commit cancels that run, which
+# is now meaningless anyway.
+concurrency:
+  group: pr-e2e-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Reset E2E gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      # A freshly opened PR cannot carry the label yet, so there is nothing to
+      # strip - but the pending status below still has to be set.
+      - name: Remove stale Action/trigger-e2e label
+        if: github.event.action != 'opened'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          error_output=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/Action%2Ftrigger-e2e" \
+            -X DELETE 2>&1)
+          exit_code=$?
+          set -e
+          if [ $exit_code -ne 0 ] && ! echo "$error_output" | grep -qi "404\|not found"; then
+            echo "$error_output" >&2
+            exit $exit_code
+          fi
+
+      - name: Set the E2E gate status to pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            -f state=pending \
+            -f context="E2E gate" \
+            -f description="Awaiting E2E - a maintainer applies Action/trigger-e2e after reviewing the diff" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
