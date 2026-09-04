@@ -14,17 +14,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# Weekly, grouped updates. Grouping matters here because every PR raised costs a
-# full build - and, if a maintainer labels it, an E2E run - so one PR per
-# dependency would swamp the runners.
-#
-# Version updates need no repository setting; Dependabot alerts and security
-# updates are separate admin toggles, tracked in #80.
+# Grouped weekly, because every PR costs a full build and possibly an E2E run.
+# Only version updates are configured here; alerts and security updates are
+# separate features, enabled under Settings -> Code security.
 version: 2
 updates:
-  # Keeps the SHA pins in .github/workflows current: Dependabot rewrites the SHA
-  # and the trailing version comment together, which is the only maintainable way
-  # to run pinned actions.
+  # Dependabot rewrites a pinned SHA and its version comment together, which is what
+  # makes the SHA pins in .github/workflows maintainable.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -33,14 +29,29 @@ updates:
       actions:
         patterns: ['*']
 
-  # The root pom is the only place versions are declared, so this covers every
-  # module in the reactor. Majors are left out of the group deliberately - a major
-  # bump of an IS-facing dependency needs reviewing on its own.
+  # The root pom declares every version, so this covers the whole reactor. Majors are
+  # excluded from the group: an IS-facing major bump needs reviewing on its own.
   - package-ecosystem: maven
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # org.wso2 versions are fixed by the Identity Server the accelerator installs
+    # over, and several are reused as OSGi Import-Package requirements in
+    # components/*/pom.xml, where a bare version means "or higher". Raising
+    # securevault by one patch (1.2.0 -> 1.2.1) made every bundle demand a version the
+    # server does not export: nothing resolved and no roles were provisioned, while
+    # `mvn clean install` stayed green because the breakage is runtime-only. Limiting
+    # the group to minor and patch is no protection - that bump was a patch.
+    #
+    # CXF and axiom are runtime-supplied too, so they track the server rather than the
+    # newest release. Jackson, gson, commons-logging and the javax/osgi APIs are
+    # provided scope as well but keep updating: their import ranges live in separate
+    # *.imp.pkg.version.range properties, independent of the build version.
+    ignore:
+      - dependency-name: "org.wso2.*:*"
+      - dependency-name: "org.apache.cxf:*"
+      - dependency-name: "org.apache.ws.commons.axiom.wso2:*"
     groups:
       maven-minor-patch:
         update-types: [minor, patch]
