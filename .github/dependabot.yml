@@ -37,7 +37,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     # org.wso2 versions are fixed by the Identity Server the accelerator installs
-    # over, and several are reused as OSGi Import-Package requirements in
+    # over - the reactor's own parent pom, org.wso2:wso2, included, hence the pattern
+    # having no dot after org.wso2 - and several are reused as Import-Package
+    # requirements in
     # components/*/pom.xml, where a bare version means "or higher". Raising
     # securevault by one patch (1.2.0 -> 1.2.1) made every bundle demand a version the
     # server does not export: nothing resolved and no roles were provisioned, while
@@ -49,7 +51,7 @@ updates:
     # provided scope as well but keep updating: their import ranges live in separate
     # *.imp.pkg.version.range properties, independent of the build version.
     ignore:
-      - dependency-name: "org.wso2.*:*"
+      - dependency-name: "org.wso2*:*"
       - dependency-name: "org.apache.cxf:*"
       - dependency-name: "org.apache.ws.commons.axiom.wso2:*"
     groups:
