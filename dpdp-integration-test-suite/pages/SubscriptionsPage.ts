@@ -47,7 +47,7 @@ export class SubscriptionsPage {
     this.heading = page.getByRole('heading', { name: 'Subscriptions' })
     this.registerButton = page.getByRole('button', { name: 'Register Subscription' })
     this.table = page.getByRole('table', { name: 'Subscriptions management table' })
-    this.searchInput = page.getByPlaceholder('Search by subscription ID, topic, group, purpose, or URL')
+    this.searchInput = page.getByPlaceholder('Search by subscription, event, delivery ID, topic, purpose, or URL')
     this.statusFilter = page.getByRole('combobox', { name: 'Status' })
     this.deliveryModeFilter = page.getByRole('combobox', { name: 'Delivery Mode' })
     this.searchButton = page.getByRole('button', { name: 'Search' })

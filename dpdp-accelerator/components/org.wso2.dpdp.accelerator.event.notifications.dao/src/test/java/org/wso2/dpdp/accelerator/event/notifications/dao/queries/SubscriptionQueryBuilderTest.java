@@ -70,9 +70,10 @@ public class SubscriptionQueryBuilderTest {
         assertTrue(selectResult.getSql().contains("LOWER(s.GROUP_ID) LIKE ? ESCAPE '!'"));
         assertTrue(selectResult.getSql().contains("LOWER(sp.PURPOSE_NAME) LIKE ? ESCAPE '!'"));
         
-        // 1 orgId parameter + 6 LIKE parameters
+        // 1 orgId parameter + 10 LIKE parameters (subscription fields plus
+        // webhook/poll delivery and associated event IDs).
         List<Object> params = selectResult.getParameters();
-        assertEquals(params.size(), 7);
+        assertEquals(params.size(), 11);
         assertEquals(params.get(0), "org123");
         assertEquals(params.get(1), "%test!_user!%name\\foo%");
     }
@@ -87,7 +88,7 @@ public class SubscriptionQueryBuilderTest {
 
         assertTrue(selectResult.getSql().contains("LOWER(s.SUBSCRIPTION_ID) LIKE ?"));
         List<Object> params = selectResult.getParameters();
-        assertEquals(params.size(), 7);
+        assertEquals(params.size(), 11);
         assertEquals(params.get(0), "org123");
         assertEquals(params.get(1), "%" + subId.toLowerCase() + "%");
     }
@@ -155,12 +156,12 @@ public class SubscriptionQueryBuilderTest {
         assertTrue(result.getSql().contains("ORDER BY s.CREATED_AT DESC"));
 
         List<Object> params = result.getParameters();
-        // orgId (1) + status (1) + search (6) + purposes (2) = 10 params
-        assertEquals(params.size(), 10);
+        // orgId (1) + status (1) + search (10) + purposes (2) = 14 params
+        assertEquals(params.size(), 14);
         assertEquals(params.get(0), "org123");
         assertEquals(params.get(1), "active");
         assertEquals(params.get(2), "%callback%");
-        assertEquals(params.get(8), "marketing");
-        assertEquals(params.get(9), "analytics");
+        assertEquals(params.get(12), "marketing");
+        assertEquals(params.get(13), "analytics");
     }
 }

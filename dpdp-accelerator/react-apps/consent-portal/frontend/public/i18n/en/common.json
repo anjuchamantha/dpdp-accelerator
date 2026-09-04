@@ -1073,7 +1073,7 @@
       "all_except": "All Except Purposes"
     },
     "filters": {
-      "searchPlaceholder": "Search by subscription ID, topic, group, purpose, or URL",
+      "searchPlaceholder": "Search by subscription, event, delivery ID, topic, purpose, or URL",
       "status": "Status",
       "allStatuses": "All Statuses",
       "deliveryMode": "Delivery Mode",

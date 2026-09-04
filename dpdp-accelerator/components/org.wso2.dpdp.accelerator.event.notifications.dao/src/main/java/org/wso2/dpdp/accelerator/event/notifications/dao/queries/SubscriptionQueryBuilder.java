@@ -130,8 +130,36 @@ public class SubscriptionQueryBuilder {
                             "LOWER(t." + EventNotificationDBColumns.NAME + ")"))
                     .append(" OR ").append(QueryBuilderUtils.buildEscapedLikePredicate(
                             "LOWER(sp." + EventNotificationDBColumns.PURPOSE_NAME + ")"))
+                    .append(" OR EXISTS (SELECT 1 FROM WEBHOOK_DELIVERY wd JOIN EVENT e ON e.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" = wd.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" WHERE wd.")
+                    .append(EventNotificationDBColumns.SUBSCRIPTION_ID).append(" = s.")
+                    .append(EventNotificationDBColumns.SUBSCRIPTION_ID).append(" AND e.")
+                    .append(EventNotificationDBColumns.ORG_ID).append(" = s.")
+                    .append(EventNotificationDBColumns.ORG_ID).append(" AND (")
+                    .append(QueryBuilderUtils.buildEscapedLikePredicate(
+                            "LOWER(wd." + EventNotificationDBColumns.DELIVERY_ID + ")"))
+                    .append(" OR ").append(QueryBuilderUtils.buildEscapedLikePredicate(
+                            "LOWER(e." + EventNotificationDBColumns.EVENT_ID + ")"))
+                    .append("))")
+                    .append(" OR EXISTS (SELECT 1 FROM POLL_DELIVERY pd JOIN EVENT e ON e.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" = pd.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" WHERE pd.")
+                    .append(EventNotificationDBColumns.SUBSCRIPTION_ID).append(" = s.")
+                    .append(EventNotificationDBColumns.SUBSCRIPTION_ID).append(" AND e.")
+                    .append(EventNotificationDBColumns.ORG_ID).append(" = s.")
+                    .append(EventNotificationDBColumns.ORG_ID).append(" AND (")
+                    .append(QueryBuilderUtils.buildEscapedLikePredicate(
+                            "LOWER(pd." + EventNotificationDBColumns.DELIVERY_ID + ")"))
+                    .append(" OR ").append(QueryBuilderUtils.buildEscapedLikePredicate(
+                            "LOWER(e." + EventNotificationDBColumns.EVENT_ID + ")"))
+                    .append("))")
                     .append(")");
             String term = QueryBuilderUtils.buildCaseInsensitiveContainsPattern(search);
+            params.add(term);
+            params.add(term);
+            params.add(term);
+            params.add(term);
             params.add(term);
             params.add(term);
             params.add(term);

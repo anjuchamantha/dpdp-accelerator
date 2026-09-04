@@ -26,7 +26,8 @@ import java.util.Locale;
 
 /**
  * Helper builder for constructing dynamic event search and count queries.
- * Mirrors {@link SubscriptionQueryBuilder} but is scoped to the EVENT table only.
+ * Mirrors {@link SubscriptionQueryBuilder} while preserving event-level results
+ * when delivery fields are used as search criteria.
  */
 public class EventQueryBuilder {
 
@@ -193,8 +194,21 @@ public class EventQueryBuilder {
                             "LOWER(t." + EventNotificationDBColumns.NAME + ")"))
                     .append(" OR ").append(QueryBuilderUtils.buildEscapedLikePredicate(
                             queries.getEventPayloadSearchExpression()))
+                    .append(" OR EXISTS (SELECT 1 FROM WEBHOOK_DELIVERY wd WHERE wd.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" = e.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" AND ")
+                    .append(QueryBuilderUtils.buildEscapedLikePredicate(
+                            "LOWER(wd." + EventNotificationDBColumns.DELIVERY_ID + ")"))
+                    .append(") OR EXISTS (SELECT 1 FROM POLL_DELIVERY pd WHERE pd.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" = e.")
+                    .append(EventNotificationDBColumns.EVENT_ID).append(" AND ")
+                    .append(QueryBuilderUtils.buildEscapedLikePredicate(
+                            "LOWER(pd." + EventNotificationDBColumns.DELIVERY_ID + ")"))
+                    .append(")")
                     .append(")");
             String term = QueryBuilderUtils.buildCaseInsensitiveContainsPattern(search);
+            params.add(term);
+            params.add(term);
             params.add(term);
             params.add(term);
             params.add(term);

@@ -305,7 +305,11 @@ paths:
           description: Comma-separated purposes
           schema:
             type: string
-        - $ref: "#/components/parameters/Search"
+        - name: search
+          in: query
+          description: Case-insensitive contains search across subscription fields, associated event IDs, and associated webhook or polling delivery IDs.
+          schema:
+            type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
         - name: sort
@@ -1098,6 +1102,7 @@ components:
     Search:
       name: search
       in: query
+      description: Case-insensitive contains search across event IDs, delivery IDs, group IDs, topic names, and configured event payload fields.
       schema:
         type: string
     Limit:

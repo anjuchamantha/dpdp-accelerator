@@ -88,6 +88,19 @@ public class QueryBuilderTest {
     }
 
     @Test
+    public void eventSearchIncludesWebhookAndPollDeliveryIds() {
+        QueryResult result = new EventQueryBuilder("org")
+                .setSearch("delivery-123")
+                .buildCountQuery("SELECT COUNT(*) FROM EVENT e JOIN TOPIC t ON 1=1 WHERE e.ORG_ID = ?");
+
+        assertTrue(result.getSql().contains("WEBHOOK_DELIVERY wd"));
+        assertTrue(result.getSql().contains("LOWER(wd.DELIVERY_ID) LIKE ? ESCAPE '!'"));
+        assertTrue(result.getSql().contains("POLL_DELIVERY pd"));
+        assertTrue(result.getSql().contains("LOWER(pd.DELIVERY_ID) LIKE ? ESCAPE '!'"));
+        assertEquals(result.getParameters().size(), 7);
+    }
+
+    @Test
     public void subscriptionBuilderCoversFiltersSortsAndEmptyInputs() {
         SubscriptionQueryBuilder full = new SubscriptionQueryBuilder("org").setStatus("active")
                 .setSearch("a_%").setPurposes("one, ,TWO").setSort("updatedAt");
@@ -99,6 +112,20 @@ public class QueryBuilderTest {
         assertTrue(new SubscriptionQueryBuilder("org").setSort("other").resolveSortColumn().contains("UPDATED_AT DESC"));
         new SubscriptionQueryBuilder("org").setStatus(" ").setSearch(null).setPurposes(" , ")
                 .buildSelectQuery(null);
+    }
+
+    @Test
+    public void subscriptionSearchIncludesWebhookPollDeliveryAndEventIds() {
+        QueryResult result = new SubscriptionQueryBuilder("org")
+                .setSearch("delivery-123")
+                .buildCountQuery();
+
+        assertTrue(result.getSql().contains("WEBHOOK_DELIVERY wd JOIN EVENT e"));
+        assertTrue(result.getSql().contains("LOWER(wd.DELIVERY_ID) LIKE ? ESCAPE '!'"));
+        assertTrue(result.getSql().contains("POLL_DELIVERY pd JOIN EVENT e"));
+        assertTrue(result.getSql().contains("LOWER(pd.DELIVERY_ID) LIKE ? ESCAPE '!'"));
+        assertTrue(result.getSql().contains("LOWER(e.EVENT_ID) LIKE ? ESCAPE '!'"));
+        assertEquals(result.getParameters().size(), 11);
     }
 
     @Test
