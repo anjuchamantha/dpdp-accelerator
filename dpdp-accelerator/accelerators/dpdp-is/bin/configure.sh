@@ -94,8 +94,8 @@ resolve_db_profile() {
 
 resolve_db_profile
 
-# Expands {host}/{port}/{db}/{user} in a profile template, plus {charset} when a
-# fourth argument is given (only the CREATE DATABASE template uses it).
+# Expands {host}/{port}/{db}/{user} in a profile template, plus {charset} when a third
+# argument is given (only the CREATE DATABASE template uses it).
 expand_template() {
   local template="$1" db="$2" charset="${3-}"
   printf '%s' "${template}" \
@@ -149,6 +149,11 @@ run_admin_sql() {
 }
 
 # database_exists <name>
+# Only empty output means "no such database". A failed query is reported and aborts,
+# because silently treating it as absent would send the product's non-idempotent DDL
+# at a database that may already hold data. The `if` form is required: a failing
+# command substitution in a plain assignment aborts under `set -e` before the status
+# can be read.
 database_exists() {
   local sql out args
   sql="$(expand_template "${DB_DB_EXISTS_SQL}" "$1")"
@@ -157,7 +162,13 @@ database_exists() {
     export "${DB_PW_ENV}=${DB_PASS}"
   fi
   # shellcheck disable=SC2086
-  out="$("${DB_CLIENT}" ${args} ${DB_CLIENT_QUERY_ARGS} -e "${sql}" 2>/dev/null || true)"
+  if ! out="$("${DB_CLIENT}" ${args} ${DB_CLIENT_QUERY_ARGS} -e "${sql}" 2>&1)"; then
+    printf '\nERROR: could not query %s on %s:%s for database "%s".\n' \
+      "${DB_ADMIN_DB}" "${DB_HOST}" "${DB_PORT}" "$1"
+    printf '       %s\n' "${out}"
+    printf '       Check DB_HOST, DB_PORT, DB_USER and DB_PASS in repository/conf/configure.properties.\n\n'
+    exit 2
+  fi
   [ -n "${out}" ]
 }
 
@@ -233,16 +244,20 @@ else
     echo "[2/4] JDBC driver already present: $(basename "${DRIVER_JAR}")"
   else
     echo "[2/4] Downloading $(basename "${DRIVER_JAR}")"
+    # Downloaded beside the target and moved into place only once complete: an
+    # interrupted transfer would otherwise leave a truncated jar that the next run
+    # reports as "already present", and the server then fails to load the driver.
+    DRIVER_TMP="${DRIVER_JAR}.part"
     if command -v curl > /dev/null 2>&1; then
-      curl -fsSL "${DB_DRIVER_URL}" -o "${DRIVER_JAR}"
+      curl -fsSL "${DB_DRIVER_URL}" -o "${DRIVER_TMP}" || { rm -f "${DRIVER_TMP}"; exit 2; }
     elif command -v wget > /dev/null 2>&1; then
-      wget -q "${DB_DRIVER_URL}" -O "${DRIVER_JAR}"
+      wget -q "${DB_DRIVER_URL}" -O "${DRIVER_TMP}" || { rm -f "${DRIVER_TMP}"; exit 2; }
     else
-      rm -f "${DRIVER_JAR}"
       echo "      ERROR: neither curl nor wget is available; download ${DB_DRIVER_URL}"
       echo "             into ${LIB_DIR} manually."
       exit 2
     fi
+    mv "${DRIVER_TMP}" "${DRIVER_JAR}"
     echo "      Driver installed."
   fi
 fi
@@ -311,6 +326,11 @@ apply_is_schema() {
 # file works as shipped.
 # This is an upstream Identity Server bug: wso2/product-is#28412. Remove this workaround
 # once the shipped mysql-migration.txt applies cleanly to MySQL 8.
+#
+# Assumes the ALTER that adds the key immediately follows the one adding the column, as it
+# does in the shipped migration - the fold does not compare table names. If a future
+# migration puts an unrelated ALTER TABLE next, the second clause would be applied to the
+# first table. Re-check this if the workaround outlives the upstream fix.
 mysqlify_migration() {
   awk '
     held != "" {
@@ -353,11 +373,17 @@ apply_consent_migration() {
 if [ "${APPLY_IS_CONSENT_MGT_V2_MIGRATION}" != "true" ] && [ "${DB_TYPE}" = "h2" ]; then
   echo "[3/4] Skipping the consent schema migration (APPLY_IS_CONSENT_MGT_V2_MIGRATION is not true)."
 elif [ "${DB_TYPE}" = "h2" ]; then
+  # The embedded database is the file WSO2 ships pre-populated; there is nothing to drop
+  # or create, so RECREATE_DATABASES has no meaning here. Say so rather than ignore it
+  # silently, or a reader expecting a clean reset gets one with no explanation.
+  if [ "${RECREATE_DATABASES}" = "true" ]; then
+    echo "[3/4] NOTE: RECREATE_DATABASES is ignored for the embedded h2 database."
+  fi
   if ! locate_h2_jar; then
     echo "[3/4] WARNING: could not locate the H2 engine jar; apply the consent migration manually."
   else
     echo "[3/4] Preparing the embedded Identity Server database"
-    apply_consent_migration "WSO2IDENTITY_DB"
+    apply_consent_migration "${DB_IDENTITY}"
   fi
 else
   echo "[3/4] Preparing the ${DB_TYPE} Identity Server databases"
