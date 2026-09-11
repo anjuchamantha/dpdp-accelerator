@@ -141,14 +141,6 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.ORG_ID_OR_TOPIC_NAME_MISSING_ERROR_MSG, 400);
         }
 
-        Optional<Topic> topicOpt = topicDAO.getTopicByOrgAndName(orgId.trim(), topicName.trim());
-        if (topicOpt.isEmpty() || TopicStatus.DEREGISTERED.getValue().equalsIgnoreCase(topicOpt.get().getStatus())) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_TOPIC_NOT_FOUND,
-                    "Topic '" + topicName + "' is not registered for this org.", 404);
-        }
-
-        Topic topic = topicOpt.get();
         PurposeFilterMode filterType = (filter != null && filter.getType() != null) ? filter.getType()
                 : PurposeFilterMode.ALL;
         List<String> purposes = (filter != null && filter.getPurposes() != null) ? filter.getPurposes()
@@ -170,50 +162,60 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
         validatePurposeFilterMode(filterType, purposes);
 
-        List<Subscription> existingSubs = subscriptionDAO.getLiveSubscriptionsByOrgAndTopic(orgId.trim(),
-                topic.getTopicId());
-        validateDuplicateAndConflict(existingSubs, effectiveGroupId, filterType, purposes, deliveryMode, callbackUrl);
-
         String initialStatus = (deliveryMode == DeliveryMode.WEBHOOK)
                 ? SubscriptionStatus.PENDING.getValue()
                 : SubscriptionStatus.ACTIVE.getValue();
 
         String subscriptionId = UUID.randomUUID().toString();
-        Subscription sub = new Subscription(subscriptionId, orgId.trim(), effectiveGroupId, topic.getTopicId(),
-                filterType.getValue(), purposes, deliveryMode.getValue(),
-                callbackUrl != null ? callbackUrl.trim() : null,
-                sharedSecret != null ? sharedSecret.trim() : null,
-                initialStatus, null, null);
+        Subscription[] sub = new Subscription[1];
 
-        try {
-            subscriptionDAO.addSubscription(sub);
-        } catch (EventNotificationInvalidStateException e) {
-            // The DAO detected a deregistered/inactive topic under the row lock — a
-            // concurrent
-            // TopicService.deleteTopic committed between our service-layer pre-check and
-            // the
-            // FOR UPDATE acquisition in the DAO. Map to 409 with the topic name for
-            // clarity.
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
-                    EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
-                    String.format(EventNotificationServiceConstants.TOPIC_NOT_ACTIVE_ERROR_MSG, topicName.trim()),
-                    409);
-        } catch (EventNotificationDuplicateResourceException e) {
-            String conflictMessage = EventNotificationCommonConstants.ERROR_SUBSCRIPTION_MIXED_DELIVERY_MODE
-                    .equals(e.getMessage())
-                            ? EventNotificationServiceConstants.MIXED_DELIVERY_MODE_SUBSCRIPTION_ERROR_MSG
-                            : EventNotificationServiceConstants.DUPLICATE_SUBSCRIPTION_ERROR_MSG;
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
-                    EventNotificationServiceConstants.ERROR_TITLE_DUPLICATE_SUBSCRIPTION,
-                    conflictMessage, 409);
-        }
+        DatabaseUtils.<Void>executeInTransaction(conn -> {
+            Optional<Topic> topicOpt = topicDAO.getTopicByOrgAndName(conn, orgId.trim(), topicName.trim());
+            if (!topicOpt.isPresent() || TopicStatus.DEREGISTERED.getValue().equalsIgnoreCase(topicOpt.get().getStatus())) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_TOPIC_NOT_FOUND,
+                        "Topic '" + topicName + "' is not registered for this org.", 404);
+            }
+
+            Topic topic = topicOpt.get();
+            List<Subscription> existingSubs = subscriptionDAO.getLiveSubscriptionsByOrgAndTopic(conn, orgId.trim(),
+                    topic.getTopicId());
+            validateDuplicateAndConflict(existingSubs, effectiveGroupId, filterType, purposes, deliveryMode, callbackUrl);
+
+            sub[0] = new Subscription(subscriptionId, orgId.trim(), effectiveGroupId, topic.getTopicId(),
+                    filterType.getValue(), purposes, deliveryMode.getValue(),
+                    callbackUrl != null ? callbackUrl.trim() : null,
+                    sharedSecret != null ? sharedSecret.trim() : null,
+                    initialStatus, null, null);
+
+            try {
+                subscriptionDAO.addSubscription(conn, sub[0]);
+            } catch (EventNotificationInvalidStateException e) {
+                // The DAO detected a deregistered/inactive topic under the row lock — a
+                // concurrent TopicService.deleteTopic committed between our service-layer
+                // pre-check and the FOR UPDATE acquisition in the DAO. Map to 409.
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
+                        EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
+                        String.format(EventNotificationServiceConstants.TOPIC_NOT_ACTIVE_ERROR_MSG, topicName.trim()),
+                        409);
+            } catch (EventNotificationDuplicateResourceException e) {
+                String conflictMessage = EventNotificationCommonConstants.ERROR_SUBSCRIPTION_MIXED_DELIVERY_MODE
+                        .equals(e.getMessage())
+                                ? EventNotificationServiceConstants.MIXED_DELIVERY_MODE_SUBSCRIPTION_ERROR_MSG
+                                : EventNotificationServiceConstants.DUPLICATE_SUBSCRIPTION_ERROR_MSG;
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
+                        EventNotificationServiceConstants.ERROR_TITLE_DUPLICATE_SUBSCRIPTION,
+                        conflictMessage, 409);
+            }
+            return null;
+        });
 
         if (deliveryMode == DeliveryMode.WEBHOOK) {
             scheduleWebhookVerificationTask(subscriptionId, orgId.trim(), callbackUrl.trim(), topicName.trim(), 0);
         }
 
-        return mapToDTO(sub, topicName.trim());
+        return mapToDTO(sub[0], topicName.trim());
     }
 
     private void validatePurposeFilterMode(PurposeFilterMode filterType, List<String> purposes) {
@@ -349,12 +351,12 @@ public class SubscriptionServiceImpl implements SubscriptionService {
      */
     private VerificationAttemptResult executeVerificationAttempt(String subscriptionId, String orgId,
             String expectedStatus, String callbackUrl, String topicName, boolean markStaleOnFailure) {
-        Connection connection = DatabaseUtils.getDBConnection();
-        try {
+
+        return DatabaseUtils.executeInTransaction(connection -> {
             VerificationAttemptResult result;
             Optional<Subscription> locked = subscriptionDAO.lockSubscriptionForVerification(connection,
                     subscriptionId, orgId, expectedStatus);
-            if (locked.isEmpty()) {
+            if (!locked.isPresent()) {
                 result = VerificationAttemptResult.notClaimed();
             } else {
                 try {
@@ -370,14 +372,8 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     result = VerificationAttemptResult.failure(e);
                 }
             }
-            DatabaseUtils.commitTransaction(connection);
             return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(connection);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(connection);
-        }
+        });
     }
 
     private static final class VerificationAttemptResult {
@@ -525,15 +521,17 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         int lim = EventNotificationParameterUtils.normalizeLimit(limit);
         int off = EventNotificationParameterUtils.normalizeOffset(offset);
         String normalizedStatus = EventNotificationParameterUtils.normalizeStatusFilter(status);
-        PaginatedDAOResult<Subscription> daoResult = subscriptionDAO.listSubscriptions(
-                orgId.trim(), normalizedStatus, purposes, search, lim, off, sort);
-        List<SubscriptionDTO> dtoList = new ArrayList<>();
-        for (Subscription sub : daoResult.getItems()) {
-            String topicName = topicDAO.getTopicById(sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
-                    .orElse("unknown");
-            dtoList.add(mapToDTO(sub, topicName));
-        }
-        return new PaginatedResult<>(dtoList, daoResult.getTotal());
+        return DatabaseUtils.executeInTransaction(conn -> {
+            PaginatedDAOResult<Subscription> daoResult = subscriptionDAO.listSubscriptions(
+                    conn, orgId.trim(), normalizedStatus, purposes, search, lim, off, sort);
+            List<SubscriptionDTO> dtoList = new ArrayList<>();
+            for (Subscription sub : daoResult.getItems()) {
+                String topicName = topicDAO.getTopicById(conn, sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
+                        .orElse("unknown");
+                dtoList.add(mapToDTO(sub, topicName));
+            }
+            return new PaginatedResult<>(dtoList, daoResult.getTotal());
+        });
     }
 
     @Override
@@ -548,16 +546,18 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.ERROR_TITLE_MALFORMED_REQUEST,
                     EventNotificationServiceConstants.SUBSCRIPTION_ID_MISSING_ERROR_MSG, 400);
         }
-        Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(subscriptionIdStr.trim(), orgId.trim());
-        if (subOpt.isPresent()) {
+        return DatabaseUtils.executeInTransaction(conn -> {
+            Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(conn, subscriptionIdStr.trim(), orgId.trim());
+            if (!subOpt.isPresent()) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+            }
             Subscription sub = subOpt.get();
-            String topicName = topicDAO.getTopicById(sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
+            String topicName = topicDAO.getTopicById(conn, sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
                     .orElse("unknown");
             return mapToDTO(sub, topicName);
-        }
-        throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
-                EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
-                EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+        });
     }
 
     @Override
@@ -573,54 +573,56 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.SUBSCRIPTION_ID_MISSING_ERROR_MSG, 400);
         }
 
-        Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(subscriptionIdStr.trim(), orgId.trim());
-        if (subOpt.isEmpty() || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(subOpt.get().getStatus())) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
-        }
-
-        Subscription sub = subOpt.get();
-        boolean deleted = subscriptionDAO.deleteSubscriptionAtomic(sub.getSubscriptionId(), orgId.trim(),
-                sub.getStatus());
-        if (!deleted) {
-            Optional<Subscription> latest = subscriptionDAO.getSubscriptionById(sub.getSubscriptionId(), orgId.trim());
-            if (latest.isEmpty() || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(latest.get().getStatus())) {
+        return DatabaseUtils.executeInTransaction(conn -> {
+            Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(conn, subscriptionIdStr.trim(), orgId.trim());
+            if (!subOpt.isPresent() || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(subOpt.get().getStatus())) {
                 throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
                         EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
                         EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
             }
-            if (!sub.getStatus().equalsIgnoreCase(latest.get().getStatus())) {
-                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
-                        EventNotificationServiceConstants.ERROR_TITLE_CONCURRENT_MUTATION,
-                        EventNotificationServiceConstants.SUBSCRIPTION_CONCURRENT_MODIFICATION_ERROR_MSG, 409);
-            }
-            if (subscriptionDAO.hasPendingOrInFlightDeliveries(sub.getSubscriptionId(), orgId.trim())) {
-                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
-                        EventNotificationServiceConstants.ERROR_TITLE_IN_FLIGHT_DELIVERIES,
-                        EventNotificationServiceConstants.SUBSCRIPTION_IN_FLIGHT_DELIVERIES_ERROR_MSG, 409);
-            }
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
-                    EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
-                    EventNotificationServiceConstants.FAILED_TO_DELETE_SUBSCRIPTION_ERROR_MSG, 500);
-        }
 
-        String topicName = topicDAO.getTopicById(sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
-                .orElse("unknown");
-        Subscription deletedSub = new Subscription(
-                sub.getSubscriptionId(),
-                sub.getOrgId(),
-                sub.getGroupId(),
-                sub.getTopicId(),
-                sub.getPurposeFilterMode(),
-                sub.getPurposes(),
-                sub.getDeliveryMode(),
-                sub.getCallbackUrl(),
-                sub.getSharedSecret(),
-                SubscriptionStatus.DELETED.getValue(),
-                sub.getCreatedAt(),
-                new java.sql.Timestamp(System.currentTimeMillis()));
-        return mapToDTO(deletedSub, topicName);
+            Subscription sub = subOpt.get();
+            boolean deleted = subscriptionDAO.deleteSubscriptionAtomic(conn, sub.getSubscriptionId(), orgId.trim(),
+                    sub.getStatus());
+            if (!deleted) {
+                Optional<Subscription> latest = subscriptionDAO.getSubscriptionById(conn, sub.getSubscriptionId(), orgId.trim());
+                if (!latest.isPresent() || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(latest.get().getStatus())) {
+                    throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
+                            EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
+                            EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+                }
+                if (!sub.getStatus().equalsIgnoreCase(latest.get().getStatus())) {
+                    throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
+                            EventNotificationServiceConstants.ERROR_TITLE_CONCURRENT_MUTATION,
+                            EventNotificationServiceConstants.SUBSCRIPTION_CONCURRENT_MODIFICATION_ERROR_MSG, 409);
+                }
+                if (subscriptionDAO.hasPendingOrInFlightDeliveries(conn, sub.getSubscriptionId(), orgId.trim())) {
+                    throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
+                            EventNotificationServiceConstants.ERROR_TITLE_IN_FLIGHT_DELIVERIES,
+                            EventNotificationServiceConstants.SUBSCRIPTION_IN_FLIGHT_DELIVERIES_ERROR_MSG, 409);
+                }
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
+                        EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
+                        EventNotificationServiceConstants.FAILED_TO_DELETE_SUBSCRIPTION_ERROR_MSG, 500);
+            }
+
+            String topicName = topicDAO.getTopicById(conn, sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
+                    .orElse("unknown");
+            Subscription deletedSub = new Subscription(
+                    sub.getSubscriptionId(),
+                    sub.getOrgId(),
+                    sub.getGroupId(),
+                    sub.getTopicId(),
+                    sub.getPurposeFilterMode(),
+                    sub.getPurposes(),
+                    sub.getDeliveryMode(),
+                    sub.getCallbackUrl(),
+                    sub.getSharedSecret(),
+                    SubscriptionStatus.DELETED.getValue(),
+                    sub.getCreatedAt(),
+                    new java.sql.Timestamp(System.currentTimeMillis()));
+            return mapToDTO(deletedSub, topicName);
+        });
     }
 
     @Override
@@ -636,38 +638,44 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.SUBSCRIPTION_ID_MISSING_ERROR_MSG, 400);
         }
 
-        Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(subscriptionId.trim(), orgId.trim());
-        if (subOpt.isEmpty() || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(subOpt.get().getStatus())) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
-        }
+        Subscription[] subHolder = new Subscription[1];
+        String[] topicNameHolder = new String[1];
+        DatabaseUtils.<Void>executeInTransaction(conn -> {
+            Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(conn, subscriptionId.trim(), orgId.trim());
+            if (!subOpt.isPresent() || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(subOpt.get().getStatus())) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+            }
 
-        Subscription sub = subOpt.get();
-        if (!SubscriptionStatus.STALE.getValue().equalsIgnoreCase(sub.getStatus())
-                && !SubscriptionStatus.PENDING.getValue().equalsIgnoreCase(sub.getStatus())) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
-                    EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
-                    EventNotificationServiceConstants.ONLY_STALE_SUBSCRIPTIONS_VERIFIABLE_ERROR_MSG,
-                    409);
-        }
+            subHolder[0] = subOpt.get();
+            if (!SubscriptionStatus.STALE.getValue().equalsIgnoreCase(subHolder[0].getStatus())
+                    && !SubscriptionStatus.PENDING.getValue().equalsIgnoreCase(subHolder[0].getStatus())) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
+                        EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
+                        EventNotificationServiceConstants.ONLY_STALE_SUBSCRIPTIONS_VERIFIABLE_ERROR_MSG,
+                        409);
+            }
 
-        if (sub.getCallbackUrl() == null || sub.getCallbackUrl().trim().isEmpty()) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
-                    EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
-                    EventNotificationServiceConstants.NO_CALLBACK_URL_ERROR_MSG, 409);
-        }
-        if (sub.getSharedSecret() == null || sub.getSharedSecret().trim().isEmpty()) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
-                    EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
-                    EventNotificationServiceConstants.SHARED_SECRET_REQUIRED_ERROR_MSG, 409);
-        }
+            if (subHolder[0].getCallbackUrl() == null || subHolder[0].getCallbackUrl().trim().isEmpty()) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
+                        EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
+                        EventNotificationServiceConstants.NO_CALLBACK_URL_ERROR_MSG, 409);
+            }
+            if (subHolder[0].getSharedSecret() == null || subHolder[0].getSharedSecret().trim().isEmpty()) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
+                        EventNotificationServiceConstants.ERROR_TITLE_INVALID_STATE,
+                        EventNotificationServiceConstants.SHARED_SECRET_REQUIRED_ERROR_MSG, 409);
+            }
 
-        String topicName = topicDAO.getTopicById(sub.getTopicId(), sub.getOrgId()).map(Topic::getName)
-                .orElse("unknown");
-        String expectedStatus = sub.getStatus().trim().toLowerCase(java.util.Locale.ROOT);
+            topicNameHolder[0] = topicDAO.getTopicById(conn, subHolder[0].getTopicId(), subHolder[0].getOrgId())
+                    .map(Topic::getName).orElse("unknown");
+            return null;
+        });
+
+        String expectedStatus = subHolder[0].getStatus().trim().toLowerCase(java.util.Locale.ROOT);
         VerificationAttemptResult result = executeVerificationAttempt(subscriptionId.trim(), orgId.trim(),
-                expectedStatus, sub.getCallbackUrl().trim(), topicName, false);
+                expectedStatus, subHolder[0].getCallbackUrl().trim(), topicNameHolder[0], false);
         if (result.claimed && !result.success) {
             String description = result.failure instanceof EventNotificationException
                     ? ((EventNotificationException) result.failure).getDescription()
@@ -677,20 +685,23 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.ERROR_TITLE_WEBHOOK_VERIFICATION_FAILED, description, 422);
         }
         if (!result.claimed) {
-            Optional<Subscription> current = subscriptionDAO.getSubscriptionById(subscriptionId.trim(), orgId.trim());
-            if (current.isEmpty()
-                    || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(current.get().getStatus())) {
-                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
-                        EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
-                        EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
-            }
+            DatabaseUtils.<Void>executeInTransaction(conn2 -> {
+                Optional<Subscription> current = subscriptionDAO.getSubscriptionById(conn2, subscriptionId.trim(), orgId.trim());
+                if (!current.isPresent()
+                        || SubscriptionStatus.DELETED.getValue().equalsIgnoreCase(current.get().getStatus())) {
+                    throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
+                            EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
+                            EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+                }
+                return null;
+            });
             throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE,
                     EventNotificationServiceConstants.ERROR_TITLE_CONCURRENT_MUTATION,
                     EventNotificationServiceConstants.SUBSCRIPTION_CONCURRENT_MODIFICATION_ERROR_MSG, 409);
         }
-        sub.setStatus(SubscriptionStatus.ACTIVE.getValue());
+        subHolder[0].setStatus(SubscriptionStatus.ACTIVE.getValue());
 
-        return mapToDTO(sub, topicName);
+        return mapToDTO(subHolder[0], topicNameHolder[0]);
     }
 
     @Override
@@ -707,35 +718,36 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.SUBSCRIPTION_ID_MISSING_ERROR_MSG, 400);
         }
 
-        Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(subscriptionId.trim(), orgId.trim());
-        if (subOpt.isEmpty()) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
-        }
+        return DatabaseUtils.<PaginatedResult<SubscriptionDeliveryDTO>>executeInTransaction(conn -> {
+            Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(conn, subscriptionId.trim(), orgId.trim());
+            if (!subOpt.isPresent()) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+            }
 
-        int lim = EventNotificationParameterUtils.normalizeLimit(limit);
-        int off = EventNotificationParameterUtils.normalizeOffset(offset);
-        int[] totalOut = new int[1];
+            int lim = EventNotificationParameterUtils.normalizeLimit(limit);
+            int off = EventNotificationParameterUtils.normalizeOffset(offset);
+            int[] totalOut = new int[1];
 
-        List<SubscriptionDeliverySummary> summaries = deliveryDAO.listSubscriptionDeliveries(orgId.trim(),
-                subscriptionId.trim(), lim,
-                off, totalOut);
-        List<SubscriptionDeliveryDTO> dtoList = new ArrayList<>();
-        for (SubscriptionDeliverySummary summary : summaries) {
-            dtoList.add(new SubscriptionDeliveryDTO(
-                    summary.getDeliveryId(),
-                    summary.getEventId(),
-                    summary.getTopicName(),
-                    summary.getCurrentStatus() != null ? summary.getCurrentStatus()
-                            : SubscriptionStatus.PENDING.getValue(),
-                    summary.getDeliveryMode() != null ? summary.getDeliveryMode()
-                            : DeliveryMode.WEBHOOK.getValue(),
-                    summary.getOccurredAt() != null ? summary.getOccurredAt().getTime()
-                            : (summary.getCreatedAt() != null ? summary.getCreatedAt().getTime()
-                                    : System.currentTimeMillis())));
-        }
-        return new PaginatedResult<>(dtoList, totalOut[0]);
+            List<SubscriptionDeliverySummary> summaries = deliveryDAO.listSubscriptionDeliveries(conn, orgId.trim(),
+                    subscriptionId.trim(), lim, off, totalOut);
+            List<SubscriptionDeliveryDTO> dtoList = new ArrayList<>();
+            for (SubscriptionDeliverySummary summary : summaries) {
+                dtoList.add(new SubscriptionDeliveryDTO(
+                        summary.getDeliveryId(),
+                        summary.getEventId(),
+                        summary.getTopicName(),
+                        summary.getCurrentStatus() != null ? summary.getCurrentStatus()
+                                : SubscriptionStatus.PENDING.getValue(),
+                        summary.getDeliveryMode() != null ? summary.getDeliveryMode()
+                                : DeliveryMode.WEBHOOK.getValue(),
+                        summary.getOccurredAt() != null ? summary.getOccurredAt().getTime()
+                                : (summary.getCreatedAt() != null ? summary.getCreatedAt().getTime()
+                                        : System.currentTimeMillis())));
+            }
+            return new PaginatedResult<>(dtoList, totalOut[0]);
+        });
     }
 
     @Override
@@ -753,23 +765,25 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     EventNotificationServiceConstants.SUBSCRIPTION_ID_MISSING_ERROR_MSG, 400);
         }
 
-        Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(subscriptionId.trim(), orgId.trim());
-        if (subOpt.isEmpty()) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
-                    EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
-        }
+        return DatabaseUtils.<SubscriptionEventHistoryDTO>executeInTransaction(conn -> {
+            Optional<Subscription> subOpt = subscriptionDAO.getSubscriptionById(conn, subscriptionId.trim(), orgId.trim());
+            if (!subOpt.isPresent()) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_NOT_FOUND,
+                        EventNotificationServiceConstants.SUBSCRIPTION_NOT_FOUND_ERROR_MSG, 404);
+            }
 
-        Optional<SubscriptionDeliverySummary> summaryOpt = deliveryDAO
-                .getSubscriptionDeliveryById(orgId.trim(), subscriptionId.trim(), deliveryId.trim());
-        if (summaryOpt.isEmpty()) {
-            throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_DELIVERY_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_DELIVERY_NOT_FOUND,
-                    EventNotificationServiceConstants.DELIVERY_NOT_FOUND_ERROR_MSG, 404);
-        }
+            Optional<SubscriptionDeliverySummary> summaryOpt = deliveryDAO
+                    .getSubscriptionDeliveryById(conn, orgId.trim(), subscriptionId.trim(), deliveryId.trim());
+            if (!summaryOpt.isPresent()) {
+                throw new EventNotificationException(EventNotificationServiceConstants.ERROR_CODE_DELIVERY_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_DELIVERY_NOT_FOUND,
+                        EventNotificationServiceConstants.DELIVERY_NOT_FOUND_ERROR_MSG, 404);
+            }
 
-        return DeliveryHistoryMapper.map(orgId.trim(), deliveryId.trim(), summaryOpt.get(), deliveryDAO,
-                deliveryAckDAO);
+            return DeliveryHistoryMapper.map(conn, orgId.trim(), deliveryId.trim(),
+                    summaryOpt.get(), deliveryDAO, deliveryAckDAO);
+        });
     }
 
     private SubscriptionDTO mapToDTO(Subscription sub, String topicName) {

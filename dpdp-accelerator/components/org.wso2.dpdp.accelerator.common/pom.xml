@@ -155,6 +155,7 @@
                             org.wso2.carbon.utils;version="${carbon.kernel.version}",
                             org.wso2.securevault;version="${securevault.version}",
                             org.wso2.securevault.commons;version="${securevault.version}",
+                            java.net.http,
                             *
                         </Import-Package>
                         <_dsannotations>*</_dsannotations>

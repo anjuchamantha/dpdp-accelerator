@@ -31,6 +31,7 @@ import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDeliveryAu
 import org.wso2.dpdp.accelerator.event.notifications.service.dto.SubscriptionDeliveryAttemptDTO;
 import org.wso2.dpdp.accelerator.event.notifications.service.dto.SubscriptionEventHistoryDTO;
 
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -43,7 +44,12 @@ final class DeliveryHistoryMapper {
     private DeliveryHistoryMapper() {
     }
 
-    static SubscriptionEventHistoryDTO map(String orgId, String deliveryId,
+    /**
+     * Maps persisted delivery state to the history response shared by event and subscription APIs.
+     * <p>
+     * Note: The caller owns the lifecycle of {@code conn}; this method does not commit or close it.
+     */
+    static SubscriptionEventHistoryDTO map(Connection conn, String orgId, String deliveryId,
             SubscriptionDeliverySummary summary, DeliveryDAO deliveryDAO, DeliveryAckDAO deliveryAckDAO) {
         String mode = summary.getDeliveryMode() != null ? summary.getDeliveryMode()
                 : DeliveryMode.WEBHOOK.getValue();
@@ -59,21 +65,21 @@ final class DeliveryHistoryMapper {
                 : (summary.getCreatedAt() != null ? summary.getCreatedAt().getTime() : System.currentTimeMillis()));
 
         if (DeliveryMode.WEBHOOK.getValue().equals(mode)) {
-            mapWebhookHistory(orgId, deliveryId, summary, deliveryDAO, deliveryAckDAO, dto);
+            mapWebhookHistory(conn, orgId, deliveryId, summary, deliveryDAO, deliveryAckDAO, dto);
         } else {
-            mapPollHistory(orgId, deliveryId, summary, deliveryDAO, dto);
+            mapPollHistory(conn, orgId, deliveryId, summary, deliveryDAO, dto);
         }
         return dto;
     }
 
-    private static void mapWebhookHistory(String orgId, String deliveryId, SubscriptionDeliverySummary summary,
+    private static void mapWebhookHistory(Connection conn, String orgId, String deliveryId, SubscriptionDeliverySummary summary,
             DeliveryDAO deliveryDAO, DeliveryAckDAO deliveryAckDAO, SubscriptionEventHistoryDTO dto) {
-        Optional<WebhookDelivery> webhookDelivery = deliveryDAO.getWebhookDeliveryById(deliveryId, orgId);
+        Optional<WebhookDelivery> webhookDelivery = deliveryDAO.getWebhookDeliveryById(conn, deliveryId, orgId);
         if (webhookDelivery.isPresent() && webhookDelivery.get().getNextRetryAt() != null) {
             dto.setNextRetryAt(webhookDelivery.get().getNextRetryAt().getTime());
         }
 
-        Optional<WebhookDeliveryAck> deliveryAck = deliveryAckDAO.getDeliveryAckByDeliveryId(deliveryId);
+        Optional<WebhookDeliveryAck> deliveryAck = deliveryAckDAO.getDeliveryAckByDeliveryId(conn, deliveryId);
         if (deliveryAck.isPresent()) {
             WebhookDeliveryAck ack = deliveryAck.get();
             dto.setCompletionStatus(ack.getCompletionStatus() != null ? ack.getCompletionStatus()
@@ -83,7 +89,7 @@ final class DeliveryHistoryMapper {
 
         List<SubscriptionDeliveryAttemptDTO> attempts = new ArrayList<>();
         int attemptNumber = 1;
-        for (WebhookDeliveryAudit audit : deliveryDAO.getWebhookDeliveryAudits(deliveryId, orgId)) {
+        for (WebhookDeliveryAudit audit : deliveryDAO.getWebhookDeliveryAudits(conn, deliveryId, orgId)) {
             attempts.add(mapAttempt(attemptNumber++, audit));
         }
         if (attempts.isEmpty()) {
@@ -117,9 +123,9 @@ final class DeliveryHistoryMapper {
         return new SubscriptionDeliveryAttemptDTO(attemptNumber, status, timestamp, httpStatus, error);
     }
 
-    private static void mapPollHistory(String orgId, String deliveryId, SubscriptionDeliverySummary summary,
+    private static void mapPollHistory(Connection conn, String orgId, String deliveryId, SubscriptionDeliverySummary summary,
             DeliveryDAO deliveryDAO, SubscriptionEventHistoryDTO dto) {
-        Optional<PollDelivery> pollDelivery = deliveryDAO.getPollDeliveryById(deliveryId, orgId);
+        Optional<PollDelivery> pollDelivery = deliveryDAO.getPollDeliveryById(conn, deliveryId, orgId);
         String pollStatus = summary.getCurrentStatus() != null ? summary.getCurrentStatus()
                 : PollStatus.PENDING.getValue();
         long timestamp = summary.getOccurredAt() != null ? summary.getOccurredAt().getTime()

@@ -9,15 +9,20 @@ package org.wso2.dpdp.accelerator.event.notifications.service.recovery;
 
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
+import org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager;
 import org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.SubscriptionDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Subscription;
 import org.wso2.dpdp.accelerator.event.notifications.service.SubscriptionService;
 
+import javax.sql.DataSource;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.sql.Connection;
 import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Collections;
@@ -26,6 +31,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
@@ -44,10 +50,17 @@ public class DeliveryRecoveryServiceTest {
     private DPDPConfigurationService configurationService;
 
     private DeliveryRecoveryService recoveryService;
+    private Connection connection;
 
     @BeforeMethod
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
+        connection = mock(Connection.class);
+        DataSource dataSource = mock(DataSource.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        setStaticInstance(null);
+        setStaticDataSource(dataSource);
+
         when(configurationService.getEventNotificationThreadPoolSize()).thenReturn(2);
         when(configurationService.getEventNotificationDeliveryWorkerPollSeconds()).thenReturn(5);
         when(configurationService.getEventNotificationDeliveryWorkerBatchSize()).thenReturn(20);
@@ -62,11 +75,29 @@ public class DeliveryRecoveryServiceTest {
                 subscriptionService, configurationService);
     }
 
+    @AfterMethod
+    public void tearDown() throws Exception {
+        setStaticDataSource(null);
+        setStaticInstance(null);
+    }
+
+    private static void setStaticDataSource(DataSource dataSource) throws Exception {
+        Field field = JDBCPersistenceManager.class.getDeclaredField("dataSource");
+        field.setAccessible(true);
+        field.set(null, dataSource);
+    }
+
+    private static void setStaticInstance(JDBCPersistenceManager instance) throws Exception {
+        Field field = JDBCPersistenceManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        field.set(null, instance);
+    }
+
     @Test
     public void pendingSubscriptionsWithCallbacksAreRetried() throws Exception {
         Subscription retryable = subscription("retryable", "https://example.com:443/callback");
         Subscription withoutCallback = subscription("without-callback", " ");
-        when(subscriptionDAO.getPendingSubscriptionsForRecovery(any(Timestamp.class), anyInt()))
+        when(subscriptionDAO.getPendingSubscriptionsForRecovery(any(Connection.class), any(Timestamp.class), anyInt()))
                 .thenReturn(Arrays.asList(retryable, withoutCallback));
         runPendingRecoveryTask();
 
@@ -76,7 +107,7 @@ public class DeliveryRecoveryServiceTest {
     @Test
     public void retryFailureDoesNotAbortOtherRecoveryRuns() throws Exception {
         Subscription retryable = subscription("retryable", "https://example.com:443/callback");
-        when(subscriptionDAO.getPendingSubscriptionsForRecovery(any(Timestamp.class), anyInt()))
+        when(subscriptionDAO.getPendingSubscriptionsForRecovery(any(Connection.class), any(Timestamp.class), anyInt()))
                 .thenReturn(Collections.singletonList(retryable));
         doThrow(new RuntimeException("verification unavailable"))
                 .when(subscriptionService).retryVerification("org1", "retryable");
@@ -89,7 +120,7 @@ public class DeliveryRecoveryServiceTest {
     @Test
     public void recoveryDelegatesClaimOwnershipToSubscriptionService() throws Exception {
         Subscription retryable = subscription("already-claimed", "https://example.com:443/callback");
-        when(subscriptionDAO.getPendingSubscriptionsForRecovery(any(Timestamp.class), anyInt()))
+        when(subscriptionDAO.getPendingSubscriptionsForRecovery(any(Connection.class), any(Timestamp.class), anyInt()))
                 .thenReturn(Collections.singletonList(retryable));
 
         runPendingRecoveryTask();
@@ -108,7 +139,7 @@ public class DeliveryRecoveryServiceTest {
     public void workerExecutorQueueIsBoundedByConfiguredBatchSize() throws Exception {
         recoveryService.activate();
         try {
-            java.lang.reflect.Field workerPoolField = DeliveryRecoveryService.class.getDeclaredField("workerPool");
+            Field workerPoolField = DeliveryRecoveryService.class.getDeclaredField("workerPool");
             workerPoolField.setAccessible(true);
             ThreadPoolExecutor workerPool = (ThreadPoolExecutor) workerPoolField.get(recoveryService);
 

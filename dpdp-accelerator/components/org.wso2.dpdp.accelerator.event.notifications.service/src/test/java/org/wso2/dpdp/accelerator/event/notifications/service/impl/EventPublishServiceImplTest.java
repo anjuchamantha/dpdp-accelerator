@@ -35,7 +35,6 @@ import org.wso2.dpdp.accelerator.event.notifications.dao.model.Topic;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDelivery;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Subscription;
 import org.wso2.dpdp.accelerator.event.notifications.common.util.HmacSigner;
-import org.wso2.dpdp.accelerator.event.notifications.service.EventFanOutService;
 import org.wso2.dpdp.accelerator.event.notifications.service.constants.EventNotificationServiceConstants;
 import org.wso2.dpdp.accelerator.event.notifications.service.dto.EventDTO;
 import org.wso2.dpdp.accelerator.event.notifications.service.dto.EventPollingRequestDTO;
@@ -83,7 +82,6 @@ public class EventPublishServiceImplTest {
 
     private EventDAO eventDAO;
     private TopicDAO topicDAO;
-    private EventFanOutService fanOutService;
     private org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryDAO deliveryDAO;
     private org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryAckDAO deliveryAckDAO;
     private SubscriptionDAO subscriptionDAO;
@@ -96,7 +94,6 @@ public class EventPublishServiceImplTest {
     public void setUp() throws Exception {
         eventDAO = mock(EventDAO.class);
         topicDAO = mock(TopicDAO.class);
-        fanOutService = mock(EventFanOutService.class);
         deliveryDAO = mock(org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryDAO.class);
         deliveryAckDAO = mock(org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryAckDAO.class);
         subscriptionDAO = mock(SubscriptionDAO.class);
@@ -113,8 +110,10 @@ public class EventPublishServiceImplTest {
         when(configurationService.getEventNotificationPollingMaxEventsLimit()).thenReturn(100);
         when(configurationService.getEventNotificationPayloadSigningAudience())
                 .thenReturn("dpdp-event-notifications");
-        publishService = new EventPublishServiceImpl(eventDAO, topicDAO, fanOutService, deliveryDAO, deliveryAckDAO,
+        publishService = new EventPublishServiceImpl(eventDAO, topicDAO, deliveryDAO, deliveryAckDAO,
                 subscriptionDAO, configurationService, signedEventPayloadFactory);
+        when(subscriptionDAO.getActiveSubscriptionsForFanOut(any(Connection.class), anyString(), anyString()))
+                .thenReturn(Collections.emptyList());
     }
 
     @AfterMethod
@@ -162,7 +161,8 @@ public class EventPublishServiceImplTest {
         assertEquals(persisted.getTopicId(), "topic-id-1");
 
         verify(eventDAO, times(1)).addEventPurposes(eq(connection), eq(dto.getEventId()), eq(Arrays.asList("marketing")));
-        verify(fanOutService, times(1)).fanOutEvent(eq(connection), any(Event.class), eq(Arrays.asList("marketing")));
+        verify(subscriptionDAO, times(1)).getActiveSubscriptionsForFanOut(eq(connection), eq("org1"),
+                eq("topic-id-1"));
     }
 
     @Test
@@ -173,10 +173,10 @@ public class EventPublishServiceImplTest {
         event.setPurposes(Collections.singletonList("payments"));
         Subscription subscription = new Subscription("subscription-1", "org1", "group-1", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
-        when(eventDAO.getEventById("event-1", "org1")).thenReturn(Optional.of(event));
-        when(deliveryDAO.getPendingPollDeliveries("org1", "group-1", "subscription-1", 11))
+        when(eventDAO.getEventById(any(Connection.class), eq("event-1"), eq("org1"))).thenReturn(Optional.of(event));
+        when(deliveryDAO.getPendingPollDeliveries(any(Connection.class), eq("org1"), eq("group-1"), eq("subscription-1"), eq(11)))
                 .thenReturn(Collections.singletonList(
                 new PollDelivery("pending-delivery", "subscription-1", "event-1", "pending",
                         event.getCreatedAt(), null)));
@@ -196,7 +196,7 @@ public class EventPublishServiceImplTest {
                 "org1", "group-1", "subscription-1", body,
                 "sha256=" + HmacSigner.sign("shared-secret", body));
 
-        verify(deliveryDAO).updatePollDeliveryStatusesByDeliveryIds(eq("org1"), eq("group-1"),
+        verify(deliveryDAO).updatePollDeliveryStatusesByDeliveryIds(any(Connection.class), eq("org1"), eq("group-1"),
                 eq("subscription-1"), eq(Collections.singletonList("ack-delivery")), anyMap());
         assertEquals(response.getSets().size(), 1);
         assertEquals(response.getSets().get("pending-delivery"), "header.claims.signature");
@@ -207,9 +207,9 @@ public class EventPublishServiceImplTest {
     public void pollEventsWithZeroMaxEventsOnlyAcknowledgesAndReportsAvailability() {
         Subscription subscription = new Subscription("subscription-1", "org1", "group-1", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
-        when(deliveryDAO.getPendingPollDeliveries("org1", "group-1", "subscription-1", 1))
+        when(deliveryDAO.getPendingPollDeliveries(any(Connection.class), eq("org1"), eq("group-1"), eq("subscription-1"), eq(1)))
                 .thenReturn(Collections.singletonList(new PollDelivery(
                         "pending-delivery", "subscription-1", "event-1", "pending", null, null)));
 
@@ -218,14 +218,14 @@ public class EventPublishServiceImplTest {
 
         assertTrue(response.isMoreAvailable());
         assertTrue(response.getSets().isEmpty());
-        verify(eventDAO, never()).getEventById(anyString(), anyString());
+        verify(eventDAO, never()).getEventById(any(Connection.class), anyString(), anyString());
     }
 
     @Test
     public void pollEventsRejectsInvalidRequestHmacBeforeUpdatingDeliveries() {
         Subscription subscription = new Subscription("subscription-1", "org1", "group-1", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
         when(configurationService.isEventNotificationPollingRequestHmacValidationEnabled()).thenReturn(true);
 
@@ -237,32 +237,32 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
         }
         verify(deliveryDAO, never()).updatePollDeliveryStatusesByDeliveryIds(
-                anyString(), anyString(), anyString(), anyList(), anyMap());
+                any(Connection.class), anyString(), anyString(), anyString(), anyList(), anyMap());
     }
 
     @Test
     public void pollEventsAuthenticatesAnEmptyFirstPollBeforeApplyingDefaults() {
         Subscription subscription = new Subscription("subscription-1", "org1", "group-1", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
         when(configurationService.isEventNotificationPollingRequestHmacValidationEnabled()).thenReturn(true);
-        when(deliveryDAO.getPendingPollDeliveries("org1", "group-1", "subscription-1", 1))
+        when(deliveryDAO.getPendingPollDeliveries(any(Connection.class), eq("org1"), eq("group-1"), eq("subscription-1"), eq(1)))
                 .thenReturn(Collections.emptyList());
 
         EventPollingResponseDTO response = publishService.pollEvents("org1", "group-1", "subscription-1", "",
                 "sha256=" + HmacSigner.sign("shared-secret", ""));
 
         assertTrue(response.getSets().isEmpty());
-        verify(deliveryDAO).updatePollDeliveryStatusesByDeliveryIds("org1", "group-1", "subscription-1",
-                Collections.emptyList(), Collections.emptyMap());
+        verify(deliveryDAO).updatePollDeliveryStatusesByDeliveryIds(any(Connection.class), eq("org1"), eq("group-1"), eq("subscription-1"),
+                eq(Collections.emptyList()), eq(Collections.emptyMap()));
     }
 
     @Test
     public void pollEventsDoesNotTreatAnEmptyBodyAsAJsonObjectForHmacVerification() {
         Subscription subscription = new Subscription("subscription-1", "org1", "group-1", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
         when(configurationService.isEventNotificationPollingRequestHmacValidationEnabled()).thenReturn(true);
 
@@ -274,14 +274,14 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
         }
         verify(deliveryDAO, never()).updatePollDeliveryStatusesByDeliveryIds(
-                anyString(), anyString(), anyString(), anyList(), anyMap());
+                any(Connection.class), anyString(), anyString(), anyString(), anyList(), anyMap());
     }
 
     @Test
     public void pollEventsRejectsOrganizationThatDiffersFromTenantContext() {
         Subscription subscription = new Subscription("subscription-1", "org1", "group-1", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
 
         try {
@@ -292,14 +292,14 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 400);
         }
         verify(deliveryDAO, never()).getPendingPollDeliveries(
-                anyString(), anyString(), anyString(), anyInt());
+                any(Connection.class), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
     public void pollEventsRejectsSubscriptionFromAnotherGroup() {
         Subscription subscription = new Subscription("subscription-1", "org1", "another-group", "topic-1",
                 "all", Collections.emptyList(), "poll", null, "shared-secret", "active", null, null);
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1"))
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1")))
                 .thenReturn(Optional.of(subscription));
 
         try {
@@ -309,7 +309,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 404);
         }
         verify(deliveryDAO, never()).getPendingPollDeliveries(
-                anyString(), anyString(), anyString(), anyInt());
+                any(Connection.class), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -319,14 +319,14 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("Group-A");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         String body = "{\"completionStatus\":\"completed\",\"completionEvidence\":\"https://processor/evidence\"}";
         String signature = "sha256=" + HmacSigner.signCompletion("shared-secret", "delivery-1", body);
 
         publishService.completeDelivery("org1", "group-a", "delivery-1", body, signature);
 
-        verify(deliveryAckDAO).addDeliveryAck(any());
+        verify(deliveryAckDAO).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test(expectedExceptions = EventNotificationException.class)
@@ -336,8 +336,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
 
         publishService.completeDelivery("org1", "group-1", "delivery-1", "{}", "sha256=bad");
     }
@@ -349,8 +349,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         String body = "{}";
 
         try {
@@ -361,12 +361,12 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 409);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_STATE);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
     public void completeDeliveryDoesNotRevealUnknownDelivery() {
-        when(deliveryDAO.getWebhookDeliveryById("unknown-delivery", "org1")).thenReturn(Optional.empty());
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("unknown-delivery"), eq("org1"))).thenReturn(Optional.empty());
 
         try {
             publishService.completeDelivery("org1", "group-1", "unknown-delivery", "{}", "sha256=bad");
@@ -375,8 +375,8 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_SIGNATURE);
         }
-        verify(subscriptionDAO, never()).getSubscriptionById(anyString(), anyString());
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(subscriptionDAO, never()).getSubscriptionById(any(Connection.class), anyString(), anyString());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
@@ -386,8 +386,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("another-group");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         String body = "{}";
 
         try {
@@ -398,15 +398,15 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_SIGNATURE);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
     public void completeDeliveryDoesNotRevealMissingSubscription() {
         WebhookDelivery delivery = new WebhookDelivery("delivery-1", "missing-subscription", "event-1", "delivered",
                 1, null, null, null, null);
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("missing-subscription", "org1")).thenReturn(Optional.empty());
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("missing-subscription"), eq("org1"))).thenReturn(Optional.empty());
 
         try {
             publishService.completeDelivery("org1", "group-1", "delivery-1", "{}", "sha256=bad");
@@ -415,7 +415,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_SIGNATURE);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
@@ -425,8 +425,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
 
         try {
             publishService.completeDelivery("org1", "group-1", "delivery-1", "{}", "sha256=bad");
@@ -435,7 +435,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_SIGNATURE);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
@@ -445,10 +445,10 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         doThrow(new EventNotificationDuplicateResourceException("duplicate"))
-                .when(deliveryAckDAO).addDeliveryAck(any());
+                .when(deliveryAckDAO).addDeliveryAck(any(Connection.class), any());
         String body = "{\"completionStatus\":\"completed\"," +
                 "\"completionEvidence\":\"https://processor.example/evidence\"}";
 
@@ -469,8 +469,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         String body = "{\"completionStatus\":\"completed\"," +
                 "\"completionEvidence\":\"http://processor.example/evidence\"}";
 
@@ -482,7 +482,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 400);
             assertEquals(e.getDescription(), EventNotificationServiceConstants.COMPLETION_EVIDENCE_INVALID_ERROR_MSG);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
@@ -492,8 +492,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-2", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-2"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         String body = "{\"completionStatus\":\"completed\",\"completionEvidence\":\"evidence\"}";
         String deliveryOneSignature = "sha256="
                 + HmacSigner.signCompletion("shared-secret", "delivery-1", body);
@@ -505,7 +505,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_SIGNATURE);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
@@ -515,8 +515,8 @@ public class EventPublishServiceImplTest {
         Subscription subscription = mock(Subscription.class);
         when(subscription.getGroupId()).thenReturn("group-1");
         when(subscription.getSharedSecret()).thenReturn("shared-secret");
-        when(deliveryDAO.getWebhookDeliveryById("delivery-1", "org1")).thenReturn(Optional.of(delivery));
-        when(subscriptionDAO.getSubscriptionById("subscription-1", "org1")).thenReturn(Optional.of(subscription));
+        when(deliveryDAO.getWebhookDeliveryById(any(Connection.class), eq("delivery-1"), eq("org1"))).thenReturn(Optional.of(delivery));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("subscription-1"), eq("org1"))).thenReturn(Optional.of(subscription));
         String body = "{\"completionStatus\":\"completed\",\"completionEvidence\":\"evidence\"}";
         String legacySignature = "sha256=" + HmacSigner.sign("shared-secret", body);
 
@@ -527,7 +527,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 401);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_SIGNATURE);
         }
-        verify(deliveryAckDAO, never()).addDeliveryAck(any());
+        verify(deliveryAckDAO, never()).addDeliveryAck(any(Connection.class), any());
     }
 
     @Test
@@ -553,8 +553,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_REQUEST);
         }
         verify(topicDAO, never()).getActiveTopicByOrgAndNameForUpdate(any(Connection.class), anyString(), anyString());
-        verify(eventDAO, never()).addEvent(any());
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
+        verify(eventDAO, never()).addEvent(any(Connection.class), any());
     }
 
     @Test
@@ -565,8 +564,7 @@ public class EventPublishServiceImplTest {
         } catch (EventNotificationException e) {
             assertEquals(e.getStatusCode(), 400);
         }
-        verify(eventDAO, never()).addEvent(any());
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
+        verify(eventDAO, never()).addEvent(any(Connection.class), any());
     }
 
     @Test
@@ -581,8 +579,7 @@ public class EventPublishServiceImplTest {
                     EventNotificationServiceConstants.GROUP_ID_MISSING_ERROR_MSG);
         }
         verify(topicDAO, never()).getActiveTopicByOrgAndNameForUpdate(any(Connection.class), anyString(), anyString());
-        verify(eventDAO, never()).addEvent(any());
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
+        verify(eventDAO, never()).addEvent(any(Connection.class), any());
     }
 
     @Test
@@ -597,8 +594,7 @@ public class EventPublishServiceImplTest {
                     EventNotificationServiceConstants.GROUP_ID_MISSING_ERROR_MSG);
         }
         verify(topicDAO, never()).getActiveTopicByOrgAndNameForUpdate(any(Connection.class), anyString(), anyString());
-        verify(eventDAO, never()).addEvent(any());
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
+        verify(eventDAO, never()).addEvent(any(Connection.class), any());
     }
 
     @Test
@@ -641,8 +637,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND);
             assertTrue(e.getDescription().contains("missing-topic"));
         }
-        verify(eventDAO, never()).addEvent(any());
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
+        verify(eventDAO, never()).addEvent(any(Connection.class), any());
     }
 
     @Test
@@ -657,7 +652,7 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 400);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_REQUEST);
         }
-        verify(eventDAO, never()).addEvent(any());
+        verify(eventDAO, never()).addEvent(any(Connection.class), any());
     }
 
     @Test
@@ -672,15 +667,14 @@ public class EventPublishServiceImplTest {
         assertEquals(exception.getStatusCode(), 400);
         assertEquals(exception.getCode(), EventNotificationServiceConstants.ERROR_CODE_INVALID_REQUEST);
         verify(eventDAO, never()).addEventPurposes(any(Connection.class), anyString(), any());
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
     }
 
     @Test
     public void publishEvent_fanOutFails_throws500() {
         when(topicDAO.getActiveTopicByOrgAndNameForUpdate(any(Connection.class), eq("org1"), eq("topic-a")))
                 .thenReturn(Optional.of(new Topic("topic-id-1", "org1", "topic-a", null, "active")));
-        doThrow(new RuntimeException("boom")).when(fanOutService)
-                .fanOutEvent(any(Connection.class), any(), any());
+        when(subscriptionDAO.getActiveSubscriptionsForFanOut(any(Connection.class), eq("org1"), eq("topic-id-1")))
+                .thenThrow(new RuntimeException("boom"));
 
         try {
             publishService.publishEvent("org1", "g1", "topic-a", Collections.emptyList(), Collections.emptyMap());
@@ -704,7 +698,6 @@ public class EventPublishServiceImplTest {
             assertEquals(e.getStatusCode(), 500);
             assertEquals(e.getCode(), EventNotificationServiceConstants.ERROR_CODE_EVENT_PUBLISH_FAILED);
         }
-        verify(fanOutService, never()).fanOutEvent(any(Connection.class), any(), any());
     }
 
     @Test
@@ -719,7 +712,7 @@ public class EventPublishServiceImplTest {
         e2.setTopic("consent-events");
         e2.setDeliveriesCount(0);
         PaginatedDAOResult<Event> daoResult = new PaginatedDAOResult<>(Arrays.asList(e1, e2), 2);
-        when(eventDAO.searchEvents(eq("org1"), any(), any(), any(), any(), eq("k"), anyInt(), anyInt())).thenReturn(daoResult);
+        when(eventDAO.searchEvents(any(Connection.class), eq("org1"), any(), any(), any(), any(), eq("k"), anyInt(), anyInt())).thenReturn(daoResult);
 
         PaginatedResult<EventDTO> result = publishService.searchEvents("org1", "k", 10, 0);
 
@@ -737,12 +730,12 @@ public class EventPublishServiceImplTest {
 
     @Test
     public void searchEvents_withAllFilters_forwardsToDao() {
-        when(eventDAO.searchEvents(eq("org1"), eq("topic1"), eq("delivered"), eq("grp1"), eq("marketing"), eq("search1"), eq(10), eq(0)))
+        when(eventDAO.searchEvents(any(Connection.class), eq("org1"), eq("topic1"), eq("delivered"), eq("grp1"), eq("marketing"), eq("search1"), eq(10), eq(0)))
                 .thenReturn(new PaginatedDAOResult<>(Collections.emptyList(), 0));
 
         PaginatedResult<EventDTO> result = publishService.searchEvents("org1", "topic1", "DELIVERED", "grp1", "marketing", "search1", 10, 0);
         assertNotNull(result);
-        verify(eventDAO, times(1)).searchEvents("org1", "topic1", "delivered", "grp1", "marketing", "search1", 10, 0);
+        verify(eventDAO, times(1)).searchEvents(any(Connection.class), eq("org1"), eq("topic1"), eq("delivered"), eq("grp1"), eq("marketing"), eq("search1"), eq(10), eq(0));
     }
 
     @Test(expectedExceptions = EventNotificationException.class)
@@ -757,48 +750,48 @@ public class EventPublishServiceImplTest {
 
     @Test
     public void searchEvents_limitClampedToMaxLimit() {
-        when(eventDAO.searchEvents(anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(eventDAO.searchEvents(any(Connection.class), anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new PaginatedDAOResult<>(Collections.<Event>emptyList(), 0));
 
         publishService.searchEvents("org1", null, 10000, 0);
 
-        verify(eventDAO, times(1)).searchEvents("org1", null, null, null, null, null,
-                EventNotificationCommonConstants.MAX_LIMIT, 0);
+        verify(eventDAO, times(1)).searchEvents(any(Connection.class), eq("org1"), eq((String) null), eq((String) null), eq((String) null), eq((String) null), eq((String) null),
+                eq(EventNotificationCommonConstants.MAX_LIMIT), eq(0));
     }
 
     @Test
     public void searchEvents_offsetNegative_treatedAsZero() {
-        when(eventDAO.searchEvents(anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(eventDAO.searchEvents(any(Connection.class), anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new PaginatedDAOResult<>(Collections.<Event>emptyList(), 0));
 
         publishService.searchEvents("org1", null, 10, -5);
 
-        verify(eventDAO, times(1)).searchEvents("org1", null, null, null, null, null, 10, 0);
+        verify(eventDAO, times(1)).searchEvents(any(Connection.class), eq("org1"), eq((String) null), eq((String) null), eq((String) null), eq((String) null), eq((String) null), eq(10), eq(0));
     }
 
     @Test
     public void searchEvents_nullSearch_daoReceivesNull() {
-        when(eventDAO.searchEvents(anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(eventDAO.searchEvents(any(Connection.class), anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new PaginatedDAOResult<>(Collections.<Event>emptyList(), 0));
 
         publishService.searchEvents("org1", null, 10, 0);
 
-        verify(eventDAO, times(1)).searchEvents("org1", null, null, null, null, null, 10, 0);
+        verify(eventDAO, times(1)).searchEvents(any(Connection.class), eq("org1"), eq((String) null), eq((String) null), eq((String) null), eq((String) null), eq((String) null), eq(10), eq(0));
     }
 
     @Test
     public void searchEvents_orgIdIsTrimmedBeforeDaoCall() {
-        when(eventDAO.searchEvents(anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(eventDAO.searchEvents(any(Connection.class), anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new PaginatedDAOResult<>(Collections.<Event>emptyList(), 0));
 
         publishService.searchEvents("  org1  ", "search", 10, 0);
 
-        verify(eventDAO, times(1)).searchEvents("org1", null, null, null, null, "search", 10, 0);
+        verify(eventDAO, times(1)).searchEvents(any(Connection.class), eq("org1"), eq((String) null), eq((String) null), eq((String) null), eq((String) null), eq("search"), eq(10), eq(0));
     }
 
     @Test
     public void searchEvents_emptyResult_isValidPaginatedResult() {
-        when(eventDAO.searchEvents(anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(eventDAO.searchEvents(any(Connection.class), anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new PaginatedDAOResult<>(Collections.<Event>emptyList(), 0));
 
         PaginatedResult<EventDTO> result = publishService.searchEvents("org1", "no-match", 10, 0);
@@ -811,7 +804,7 @@ public class EventPublishServiceImplTest {
 
     @Test
     public void searchEvents_daoThrows_propagates() {
-        when(eventDAO.searchEvents(anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        when(eventDAO.searchEvents(any(Connection.class), anyString(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("db down"));
 
         try {
@@ -828,9 +821,9 @@ public class EventPublishServiceImplTest {
                 new org.wso2.dpdp.accelerator.event.notifications.dao.model.SubscriptionDeliverySummary(
                         "dlv-1", "evt-1", "sub-1", "topic-1", "DELIVERED", "webhook",
                         new Timestamp(1710000000000L), new Timestamp(1710000000000L), "{}");
-        when(deliveryDAO.listOrgDeliveries(eq("org1"), eq("delivered"), eq("sub-1"), eq("grp-1"), eq("marketing"), eq("search"), eq(10), eq(0), any(int[].class)))
+        when(deliveryDAO.listOrgDeliveries(any(Connection.class), eq("org1"), eq("delivered"), eq("sub-1"), eq("grp-1"), eq("marketing"), eq("search"), eq(10), eq(0), any(int[].class)))
                 .thenAnswer(invocation -> {
-                    int[] total = invocation.getArgument(8);
+                    int[] total = invocation.getArgument(9);
                     total[0] = 1;
                     return Collections.singletonList(summary);
                 });
@@ -860,8 +853,8 @@ public class EventPublishServiceImplTest {
                 new org.wso2.dpdp.accelerator.event.notifications.dao.model.SubscriptionDeliverySummary(
                         "dlv-1", "evt-1", "sub-1", "topic-1", "DELIVERED", "webhook",
                         new Timestamp(1710000000000L), new Timestamp(1710000000000L), "{}");
-        when(deliveryDAO.getOrgDeliveryById("org1", "dlv-1")).thenReturn(Optional.of(summary));
-        when(deliveryDAO.getWebhookDeliveryAudits("dlv-1", "org1")).thenReturn(Collections.emptyList());
+        when(deliveryDAO.getOrgDeliveryById(any(Connection.class), eq("org1"), eq("dlv-1"))).thenReturn(Optional.of(summary));
+        when(deliveryDAO.getWebhookDeliveryAudits(any(Connection.class), eq("dlv-1"), eq("org1"))).thenReturn(Collections.emptyList());
 
         org.wso2.dpdp.accelerator.event.notifications.service.dto.SubscriptionEventHistoryDTO dto =
                 publishService.getDeliveryHistory("org1", "dlv-1");
@@ -873,7 +866,7 @@ public class EventPublishServiceImplTest {
 
     @Test
     public void getDeliveryHistory_notFound_throws404() {
-        when(deliveryDAO.getOrgDeliveryById("org1", "dlv-1")).thenReturn(Optional.empty());
+        when(deliveryDAO.getOrgDeliveryById(any(Connection.class), eq("org1"), eq("dlv-1"))).thenReturn(Optional.empty());
 
         try {
             publishService.getDeliveryHistory("org1", "dlv-1");
@@ -888,8 +881,8 @@ public class EventPublishServiceImplTest {
         Timestamp now = new Timestamp(1710000000000L);
         Event event = new Event("evt-1", "org1", "group-1", "top-1", "{\"msg\":\"hi\"}", now);
         event.setPurposes(Arrays.asList("marketing"));
-        when(eventDAO.getEventById("evt-1", "org1")).thenReturn(Optional.of(event));
-        when(topicDAO.getTopicById("top-1", "org1")).thenReturn(Optional.of(new Topic("top-1", "org1", "consent.granted", "desc", "active")));
+        when(eventDAO.getEventById(any(Connection.class), eq("evt-1"), eq("org1"))).thenReturn(Optional.of(event));
+        when(topicDAO.getTopicById(any(Connection.class), eq("top-1"), eq("org1"))).thenReturn(Optional.of(new Topic("top-1", "org1", "consent.granted", "desc", "active")));
 
         EventDTO dto = publishService.getEventById("org1", "evt-1");
         assertNotNull(dto);
@@ -900,7 +893,7 @@ public class EventPublishServiceImplTest {
 
     @Test
     public void getEventById_notFound_throws404() {
-        when(eventDAO.getEventById("evt-1", "org1")).thenReturn(Optional.empty());
+        when(eventDAO.getEventById(any(Connection.class), eq("evt-1"), eq("org1"))).thenReturn(Optional.empty());
 
         try {
             publishService.getEventById("org1", "evt-1");
@@ -916,7 +909,7 @@ public class EventPublishServiceImplTest {
                 new org.wso2.dpdp.accelerator.event.notifications.dao.model.SubscriptionDeliverySummary(
                         "dlv-1", "evt-1", "sub-1", "consent.granted", "DELIVERED", "webhook",
                         new Timestamp(1710000000000L), new Timestamp(1710000000000L), "{}");
-        when(deliveryDAO.listEventDeliveries(eq("org1"), eq("evt-1"), anyInt(), anyInt(), any(int[].class)))
+        when(deliveryDAO.listEventDeliveries(any(Connection.class), eq("org1"), eq("evt-1"), anyInt(), anyInt(), any(int[].class)))
                 .thenReturn(Collections.singletonList(summary));
 
         PaginatedResult<SubscriptionDeliveryDTO> result = publishService.getEventDeliveries("org1", "evt-1", 10, 0);

@@ -19,7 +19,6 @@
 package org.wso2.dpdp.accelerator.event.notifications.dao;
 
 import org.wso2.dpdp.accelerator.event.notifications.common.enums.TopicStatus;
-import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Topic;
 
 import java.sql.Connection;
@@ -27,38 +26,18 @@ import java.util.Optional;
 
 public interface TopicDAO {
 
-    boolean addTopic(Topic topic);
-
     boolean addTopic(Connection conn, Topic topic);
 
-    Optional<Topic> getTopicById(String topicId, String orgId);
+    Optional<Topic> getTopicById(Connection conn, String topicId, String orgId);
 
     Optional<Topic> getTopicByOrgAndName(Connection conn, String orgId, String name);
 
     Optional<Topic> getActiveTopicByOrgAndNameForUpdate(Connection conn, String orgId, String name);
 
-    default Optional<Topic> getTopicByOrgAndName(String orgId, String name) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            Optional<Topic> result = getTopicByOrgAndName(conn, orgId, name);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    boolean updateTopicStatus(String topicId, String orgId, TopicStatus status);
-
     boolean updateTopicStatus(Connection conn, String topicId, String orgId, TopicStatus status);
-
-    boolean deregisterTopicAtomic(String topicId, String orgId);
 
     boolean deregisterTopicAtomic(Connection conn, String topicId, String orgId);
 
-    PaginatedDAOResult<Topic> listTopics(String orgId, String status, String search, int limit, int offset,
+    PaginatedDAOResult<Topic> listTopics(Connection conn, String orgId, String status, String search, int limit, int offset,
             String sort);
 }

@@ -443,6 +443,8 @@ request_hmac_validation_enabled = false
 [dpdp_accelerator.event_notifications.webhook]
 thread_pool_size = 4
 base_backoff_seconds = 5
+# Number of retries after the initial webhook delivery or subscription-verification attempt.
+# For example, 5 allows up to 6 total attempts.
 max_retries = 5
 allow_http_callback_url = true
 # Comma-separated destination ports permitted for webhook callback URLs (-1 means no port was

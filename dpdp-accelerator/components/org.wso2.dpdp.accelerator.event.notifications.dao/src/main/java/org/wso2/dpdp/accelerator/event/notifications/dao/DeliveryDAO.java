@@ -18,7 +18,6 @@
 
 package org.wso2.dpdp.accelerator.event.notifications.dao;
 
-import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.PollDelivery;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.PollDeliveryError;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.SubscriptionDeliverySummary;
@@ -36,65 +35,43 @@ public interface DeliveryDAO {
 
     boolean addWebhookDelivery(Connection conn, WebhookDelivery delivery);
 
-    default boolean addWebhookDelivery(WebhookDelivery delivery) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = addWebhookDelivery(conn, delivery);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    Optional<WebhookDelivery> getWebhookDeliveryById(String deliveryId, String orgId);
+    Optional<WebhookDelivery> getWebhookDeliveryById(Connection conn, String deliveryId, String orgId);
 
     /**
      * Returns the next batch of pending webhook deliveries joined with the matching
      * subscription callback URL, shared secret, and event payload so the dispatch worker can
      * issue a single HTTP POST without further DAO calls.
      */
-    List<WebhookDeliveryDispatchContext> getPendingWebhookDispatchContexts(int limit);
+    List<WebhookDeliveryDispatchContext> getPendingWebhookDispatchContexts(Connection conn, int limit);
 
     /**
      * Returns the next batch of stuck in-flight webhook deliveries joined with the same
-     * subscription/event context used by {@link #getPendingWebhookDispatchContexts(int)}.
+     * subscription/event context used by {@link #getPendingWebhookDispatchContexts(Connection, int)}.
      */
-    List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(int limit);
+    List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(Connection conn, int limit);
 
-    List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(int limit, Timestamp updatedBefore);
+    List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(Connection conn, int limit, Timestamp updatedBefore);
 
-    boolean updateWebhookDeliveryStatus(WebhookDelivery delivery);
+    boolean updateWebhookDeliveryStatus(Connection conn, WebhookDelivery delivery);
 
-    boolean recordSuccessfulAttempt(WebhookDeliveryAudit audit, WebhookDelivery delivery);
+    boolean recordSuccessfulAttempt(Connection conn, WebhookDeliveryAudit audit, WebhookDelivery delivery);
 
-    boolean recordRetryableFailure(WebhookDeliveryAudit audit, String deliveryId, int attemptCount, Timestamp nextRetryAt);
+    boolean recordRetryableFailure(Connection conn, WebhookDeliveryAudit audit, String deliveryId, int attemptCount, Timestamp nextRetryAt);
 
-    boolean recordPermanentFailure(WebhookDeliveryAudit audit, WebhookDelivery delivery);
+    boolean recordPermanentFailure(Connection conn, WebhookDeliveryAudit audit, WebhookDelivery delivery);
 
-    boolean addWebhookDeliveryAudit(WebhookDeliveryAudit audit);
+    boolean addWebhookDeliveryAudit(Connection conn, WebhookDeliveryAudit audit);
 
-    List<WebhookDeliveryAudit> getWebhookDeliveryAudits(String deliveryId, String orgId);
-
-    boolean addPollDelivery(PollDelivery delivery);
+    List<WebhookDeliveryAudit> getWebhookDeliveryAudits(Connection conn, String deliveryId, String orgId);
 
     boolean addPollDelivery(Connection connection, PollDelivery delivery);
 
-    Optional<PollDelivery> getPollDeliveryById(String deliveryId, String orgId);
+    Optional<PollDelivery> getPollDeliveryById(Connection conn, String deliveryId, String orgId);
 
-    List<PollDelivery> getPendingPollDeliveries(String orgId, String groupId, String subscriptionId, int limit);
-
-    /** Applies polling outcomes only to pending deliveries owned by the supplied subscription. */
-    void updatePollDeliveryStatusesByDeliveryIds(String orgId, String groupId, String subscriptionId,
-            List<String> ackDeliveryIds, Map<String, PollDeliveryError> errors);
+    List<PollDelivery> getPendingPollDeliveries(Connection conn, String orgId, String groupId, String subscriptionId, int limit);
 
     void updatePollDeliveryStatusesByDeliveryIds(Connection connection, String orgId, String groupId,
             String subscriptionId, List<String> ackDeliveryIds, Map<String, PollDeliveryError> errors);
-
-    boolean claimWebhookDelivery(String deliveryId);
 
     boolean claimWebhookDelivery(Connection connection, String deliveryId);
 
@@ -104,34 +81,25 @@ public interface DeliveryDAO {
      * in_flight AND old enough — a concurrent active worker whose UPDATED_AT was just
      * refreshed will not be interrupted.
      */
-    boolean claimStuckWebhookDelivery(String deliveryId, Timestamp updatedBefore);
-
     boolean claimStuckWebhookDelivery(Connection connection, String deliveryId, Timestamp updatedBefore);
-
-    boolean releaseWebhookDelivery(String deliveryId, int attemptCount, Timestamp nextRetryAt);
 
     boolean releaseWebhookDelivery(Connection connection, String deliveryId, int attemptCount, Timestamp nextRetryAt);
 
-    boolean claimPollDelivery(String deliveryId);
-
     boolean claimPollDelivery(Connection connection, String deliveryId);
 
-    boolean updatePollDeliveryStatus(String deliveryId, String status);
-
     boolean updatePollDeliveryStatus(Connection connection, String deliveryId, String status);
-
-    boolean updatePollDeliveryStatus(String deliveryId, String expectedStatus, String newStatus);
 
     boolean updatePollDeliveryStatus(Connection connection, String deliveryId, String expectedStatus,
             String newStatus);
 
-    List<SubscriptionDeliverySummary> listSubscriptionDeliveries(String orgId, String subscriptionId, int limit, int offset, int[] totalOut);
+    List<SubscriptionDeliverySummary> listSubscriptionDeliveries(Connection conn, String orgId, String subscriptionId, int limit, int offset, int[] totalOut);
 
-    Optional<SubscriptionDeliverySummary> getSubscriptionDeliveryById(String orgId, String subscriptionId, String deliveryId);
+    Optional<SubscriptionDeliverySummary> getSubscriptionDeliveryById(Connection conn, String orgId, String subscriptionId, String deliveryId);
 
     /**
      * Paginated list of event deliveries across the organisation.
      *
+     * @param conn database connection.
      * @param orgId organisation identifier.
      * @param statusFilter optional delivery status filter.
      * @param subscriptionIdFilter optional subscription filter.
@@ -142,14 +110,15 @@ public interface DeliveryDAO {
      * @param totalOut 1-element array to receive the total matching row count.
      * @return list of delivery summaries.
      */
-    default List<SubscriptionDeliverySummary> listOrgDeliveries(String orgId, String statusFilter,
+    default List<SubscriptionDeliverySummary> listOrgDeliveries(Connection conn, String orgId, String statusFilter,
             String subscriptionIdFilter, String purposesFilter, String search, int limit, int offset, int[] totalOut) {
-        return listOrgDeliveries(orgId, statusFilter, subscriptionIdFilter, null, purposesFilter, search, limit, offset, totalOut);
+        return listOrgDeliveries(conn, orgId, statusFilter, subscriptionIdFilter, null, purposesFilter, search, limit, offset, totalOut);
     }
 
     /**
      * Paginated list of event deliveries across the organisation with group filter support.
      *
+     * @param conn database connection.
      * @param orgId organisation identifier.
      * @param statusFilter optional delivery status filter.
      * @param subscriptionIdFilter optional subscription filter.
@@ -161,14 +130,15 @@ public interface DeliveryDAO {
      * @param totalOut 1-element array to receive the total matching row count.
      * @return list of delivery summaries.
      */
-    List<SubscriptionDeliverySummary> listOrgDeliveries(String orgId, String statusFilter,
+    List<SubscriptionDeliverySummary> listOrgDeliveries(Connection conn, String orgId, String statusFilter,
             String subscriptionIdFilter, String groupIdFilter, String purposesFilter, String search, int limit, int offset, int[] totalOut);
 
-    Optional<SubscriptionDeliverySummary> getOrgDeliveryById(String orgId, String deliveryId);
+    Optional<SubscriptionDeliverySummary> getOrgDeliveryById(Connection conn, String orgId, String deliveryId);
 
     /**
      * Paginated list of deliveries generated for a specific published event.
      *
+     * @param conn database connection.
      * @param orgId organisation identifier.
      * @param eventId event identifier.
      * @param limit page size.
@@ -176,5 +146,5 @@ public interface DeliveryDAO {
      * @param totalOut 1-element array to receive the total matching row count.
      * @return list of delivery summaries.
      */
-    List<SubscriptionDeliverySummary> listEventDeliveries(String orgId, String eventId, int limit, int offset, int[] totalOut);
+    List<SubscriptionDeliverySummary> listEventDeliveries(Connection conn, String orgId, String eventId, int limit, int offset, int[] totalOut);
 }

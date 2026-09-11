@@ -25,7 +25,6 @@ import org.wso2.dpdp.accelerator.event.notifications.common.exception.EventNotif
 import org.wso2.dpdp.accelerator.event.notifications.dao.constants.EventNotificationDBColumns;
 import org.wso2.dpdp.accelerator.event.notifications.common.exception.EventNotificationDuplicateResourceException;
 import org.wso2.dpdp.accelerator.event.notifications.common.exception.EventNotificationInvalidStateException;
-import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.PaginatedDAOResult;
 import org.wso2.dpdp.accelerator.event.notifications.dao.TopicDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Topic;
@@ -47,22 +46,6 @@ public class TopicDAOImpl implements TopicDAO {
 
     private EventNotificationCommonDBQueries getQueries(Connection conn) {
         return EventNotificationQueryFactory.getQueryProvider(conn);
-    }
-
-    @Override
-    public boolean addTopic(Topic topic) {
-        Objects.requireNonNull(topic, EventNotificationCommonConstants.ERROR_TOPIC_NULL);
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = addTopic(conn, topic);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
     }
 
     @Override
@@ -109,34 +92,22 @@ public class TopicDAOImpl implements TopicDAO {
     }
 
     @Override
-    public Optional<Topic> getTopicById(String topicId, String orgId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetTopicByIdQuery())) {
-                ps.setString(1, topicId);
-                ps.setString(2, orgId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return Optional.of(mapTopic(rs));
-                    }
-                }
-                return Optional.empty();
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_TOPIC_BY_ID, topicId), e);
-            }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+    public Optional<Topic> getTopicById(Connection conn, String topicId, String orgId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
         }
-    }
-
-    @Override
-    public Optional<Topic> getTopicByOrgAndName(String orgId, String name) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            return getTopicByOrgAndName(conn, orgId, name);
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+        try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetTopicByIdQuery())) {
+            ps.setString(1, topicId);
+            ps.setString(2, orgId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(mapTopic(rs));
+                }
+            }
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_TOPIC_BY_ID, topicId), e);
         }
     }
 
@@ -181,22 +152,6 @@ public class TopicDAOImpl implements TopicDAO {
     }
 
     @Override
-    public boolean updateTopicStatus(String topicId, String orgId, TopicStatus status) {
-        Objects.requireNonNull(status, EventNotificationCommonConstants.ERROR_TOPIC_STATUS_NULL);
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = updateTopicStatus(conn, topicId, orgId, status);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean updateTopicStatus(Connection conn, String topicId, String orgId, TopicStatus status) {
         Objects.requireNonNull(conn, "Connection cannot be null.");
         Objects.requireNonNull(status, EventNotificationCommonConstants.ERROR_TOPIC_STATUS_NULL);
@@ -208,21 +163,6 @@ public class TopicDAOImpl implements TopicDAO {
         } catch (SQLException e) {
             throw new EventNotificationDataAccessException(
                     String.format(EventNotificationCommonConstants.ERROR_UPDATING_TOPIC_STATUS, topicId), e);
-        }
-    }
-
-    @Override
-    public boolean deregisterTopicAtomic(String topicId, String orgId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = deregisterTopicAtomic(conn, topicId, orgId);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
         }
     }
 
@@ -275,18 +215,19 @@ public class TopicDAOImpl implements TopicDAO {
     }
 
     @Override
-    public PaginatedDAOResult<Topic> listTopics(String orgId, String status, String search, int limit, int offset,
+    public PaginatedDAOResult<Topic> listTopics(Connection conn, String orgId, String status, String search, int limit, int offset,
             String sort) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         List<Topic> topics = new ArrayList<>();
         TopicQueryBuilder builder = new TopicQueryBuilder(orgId)
                 .setStatus(status)
                 .setSearch(search)
                 .setSort(sort);
 
-        int[] total = {0};
-        Connection conn = DatabaseUtils.getDBConnection();
+        int total = 0;
         try {
-          try {
             EventNotificationCommonDBQueries queries = getQueries(conn);
             QueryResult countResult = builder.buildCountQuery();
             QueryResult selectResult = builder.buildSelectQuery(
@@ -299,7 +240,7 @@ public class TopicDAOImpl implements TopicDAO {
                 }
                 try (ResultSet rs = countPs.executeQuery()) {
                     if (rs.next()) {
-                        total[0] = rs.getInt(1);
+                        total = rs.getInt(1);
                     }
                 }
             }
@@ -318,13 +259,10 @@ public class TopicDAOImpl implements TopicDAO {
                     }
                 }
             }
-            return new PaginatedDAOResult<>(topics, total[0]);
-          } catch (SQLException e) {
+            return new PaginatedDAOResult<>(topics, total);
+        } catch (SQLException e) {
             throw new EventNotificationDataAccessException(
                     String.format(EventNotificationCommonConstants.ERROR_LISTING_TOPICS, orgId), e);
-          }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
         }
     }
 

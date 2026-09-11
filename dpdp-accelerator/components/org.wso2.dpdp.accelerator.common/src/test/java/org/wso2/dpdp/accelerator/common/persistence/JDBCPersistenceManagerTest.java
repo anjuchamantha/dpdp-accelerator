@@ -18,6 +18,7 @@ import java.lang.reflect.Field;
 import java.sql.Connection;
 import java.sql.SQLException;
 
+import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertSame;
 import static org.testng.Assert.expectThrows;
 
@@ -68,6 +69,37 @@ public class JDBCPersistenceManagerTest {
         setStaticInstance(null);
 
         expectThrows(DPDPCommonRuntimeException.class, JDBCPersistenceManager::getInstance);
+    }
+
+    @Test
+    public void getDBConnectionClosesConnectionWhenDisablingAutoCommitFails() throws Exception {
+
+        Connection connection = Mockito.mock(Connection.class);
+        Mockito.when(dataSource.getConnection()).thenReturn(connection);
+        Mockito.doThrow(new SQLException("auto-commit failure")).when(connection).setAutoCommit(false);
+
+        DPDPCommonRuntimeException exception = expectThrows(DPDPCommonRuntimeException.class,
+                () -> JDBCPersistenceManager.getInstance().getDBConnection());
+
+        assertEquals(exception.getCause().getMessage(), "auto-commit failure");
+        Mockito.verify(connection).close();
+    }
+
+    @Test
+    public void getDBConnectionPreservesCloseFailureWhenDisablingAutoCommitFails() throws Exception {
+
+        Connection connection = Mockito.mock(Connection.class);
+        Mockito.when(dataSource.getConnection()).thenReturn(connection);
+        SQLException autoCommitFailure = new SQLException("auto-commit failure");
+        SQLException closeFailure = new SQLException("close failure");
+        Mockito.doThrow(autoCommitFailure).when(connection).setAutoCommit(false);
+        Mockito.doThrow(closeFailure).when(connection).close();
+
+        DPDPCommonRuntimeException exception = expectThrows(DPDPCommonRuntimeException.class,
+                () -> JDBCPersistenceManager.getInstance().getDBConnection());
+
+        assertSame(exception.getCause(), autoCommitFailure);
+        assertSame(exception.getCause().getSuppressed()[0], closeFailure);
     }
 
     @Test

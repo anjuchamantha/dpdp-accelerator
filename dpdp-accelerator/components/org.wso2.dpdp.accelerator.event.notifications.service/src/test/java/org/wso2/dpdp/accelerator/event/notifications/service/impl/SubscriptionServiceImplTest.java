@@ -43,15 +43,20 @@ import org.wso2.dpdp.accelerator.event.notifications.service.model.PaginatedResu
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
 import org.wso2.dpdp.accelerator.common.constant.DPDPCommonConstants;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Field;
+import java.sql.Connection;
 import java.sql.Timestamp;
 import java.util.Collections;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,11 +81,18 @@ public class SubscriptionServiceImplTest {
     @Mock
     private DPDPConfigurationService configurationService;
 
+    @Mock
+    private Connection connection;
+
     private SubscriptionServiceImpl subscriptionService;
 
     @BeforeMethod
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
+        DataSource dataSource = mock(DataSource.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        setStaticInstance(null);
+        setStaticDataSource(dataSource);
         when(configurationService.getEventNotificationThreadPoolSize()).thenReturn(4);
         when(configurationService.getEventNotificationBaseBackoffSeconds()).thenReturn(5L);
         when(configurationService.getEventNotificationMaxRetries()).thenReturn(5);
@@ -93,11 +105,29 @@ public class SubscriptionServiceImplTest {
                 configurationService);
     }
 
+    @org.testng.annotations.AfterMethod
+    public void tearDown() throws Exception {
+        setStaticDataSource(null);
+        setStaticInstance(null);
+    }
+
+    private static void setStaticDataSource(DataSource dataSource) throws Exception {
+        Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class.getDeclaredField("dataSource");
+        field.setAccessible(true);
+        field.set(null, dataSource);
+    }
+
+    private static void setStaticInstance(org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager instance) throws Exception {
+        Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        field.set(null, instance);
+    }
+
     @Test
     public void testCreatePollSubscriptionSuccess() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -117,8 +147,8 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testCreateSubscriptionNullGroupIdDefaultsToOrgId() {
         Topic topic = new Topic("t1", "org1", "topic1", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "topic1")).thenReturn(Optional.of(topic));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("topic1"))).thenReturn(Optional.of(topic));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -130,8 +160,8 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testCreateSubscriptionBlankGroupIdDefaultsToOrgId() {
         Topic topic = new Topic("t1", "org1", "topic1", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "topic1")).thenReturn(Optional.of(topic));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("topic1"))).thenReturn(Optional.of(topic));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -150,7 +180,7 @@ public class SubscriptionServiceImplTest {
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateSpecificSubscriptionMissingPurposes() {
         Topic topic = new Topic("t1", "org1", "topic1", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "topic1")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("topic1"))).thenReturn(Optional.of(topic));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.SPECIFIC, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -160,7 +190,7 @@ public class SubscriptionServiceImplTest {
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateExceptSubscriptionMissingPurposes() {
         Topic topic = new Topic("t1", "org1", "topic1", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "topic1")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("topic1"))).thenReturn(Optional.of(topic));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.EXCEPT, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -170,8 +200,8 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testCreateExceptSubscriptionWithPurposesSucceeds() {
         Topic topic = new Topic("t1", "org1", "topic1", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "topic1")).thenReturn(Optional.of(topic));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("topic1"))).thenReturn(Optional.of(topic));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.EXCEPT, java.util.Arrays.asList("marketing", "billing"));
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -183,16 +213,12 @@ public class SubscriptionServiceImplTest {
 
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateSubscriptionTopicDeregisteredUnderLockReturns409() throws Exception {
-        // Simulates the create-subscription vs delete-topic race: the service-layer pre-check sees
-        // an active topic, but between then and the DAO acquiring the FOR UPDATE lock, a concurrent
-        // deleteTopic commits and marks the topic deregistered. The DAO's under-lock re-check throws
-        // EventNotificationInvalidStateException, which the service maps to a 409.
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
         doThrow(new EventNotificationInvalidStateException(
                 org.wso2.dpdp.accelerator.event.notifications.common.constants
                         .EventNotificationCommonConstants.ERROR_TOPIC_NOT_ACTIVE))
-                .when(subscriptionDAO).addSubscription(any(Subscription.class));
+                .when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.POLL, null, "secret123");
@@ -204,8 +230,8 @@ public class SubscriptionServiceImplTest {
     public void testListSubscriptions() {
         Subscription sub = new Subscription("sub1", "org1", "group1", "t1", "ALL", Collections.emptyList(), "POLL", null, "secret", "ACTIVE", new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
         PaginatedDAOResult<Subscription> daoResult = new PaginatedDAOResult<>(Collections.singletonList(sub), 1);
-        when(subscriptionDAO.listSubscriptions("org1", "active", null, null, 10, 0, "asc")).thenReturn(daoResult);
-        when(topicDAO.getTopicById("t1", "org1")).thenReturn(Optional.of(new Topic("t1", "org1", "user-consent", "desc", "active")));
+        when(subscriptionDAO.listSubscriptions(any(Connection.class), eq("org1"), eq("active"), any(), any(), eq(10), eq(0), eq("asc"))).thenReturn(daoResult);
+        when(topicDAO.getTopicById(any(Connection.class), eq("t1"), eq("org1"))).thenReturn(Optional.of(new Topic("t1", "org1", "user-consent", "desc", "active")));
 
         PaginatedResult<SubscriptionDTO> result = subscriptionService.listSubscriptions("org1", "active", null, null, 10, 0, "asc");
         assertNotNull(result);
@@ -216,8 +242,8 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testGetSubscriptionSuccess() {
         Subscription sub = new Subscription("sub1", "org1", "group1", "t1", "ALL", Collections.emptyList(), "POLL", null, "secret", "ACTIVE", new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getSubscriptionById("sub1", "org1")).thenReturn(Optional.of(sub));
-        when(topicDAO.getTopicById("t1", "org1")).thenReturn(Optional.of(new Topic("t1", "org1", "user-consent", "desc", "active")));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("sub1"), eq("org1"))).thenReturn(Optional.of(sub));
+        when(topicDAO.getTopicById(any(Connection.class), eq("t1"), eq("org1"))).thenReturn(Optional.of(new Topic("t1", "org1", "user-consent", "desc", "active")));
 
         SubscriptionDTO result = subscriptionService.getSubscription("org1", "sub1");
         assertNotNull(result);
@@ -227,21 +253,21 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testDeleteSubscriptionSuccess() {
         Subscription sub = new Subscription("sub1", "org1", "group1", "t1", "ALL", Collections.emptyList(), "POLL", null, "secret", "ACTIVE", new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getSubscriptionById("sub1", "org1")).thenReturn(Optional.of(sub));
-        when(subscriptionDAO.deleteSubscriptionAtomic("sub1", "org1", "ACTIVE")).thenReturn(true);
-        when(topicDAO.getTopicById("t1", "org1")).thenReturn(Optional.of(new Topic("t1", "org1", "user-consent", "desc", "active")));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("sub1"), eq("org1"))).thenReturn(Optional.of(sub));
+        when(subscriptionDAO.deleteSubscriptionAtomic(any(Connection.class), eq("sub1"), eq("org1"), eq("ACTIVE"))).thenReturn(true);
+        when(topicDAO.getTopicById(any(Connection.class), eq("t1"), eq("org1"))).thenReturn(Optional.of(new Topic("t1", "org1", "user-consent", "desc", "active")));
 
         SubscriptionDTO deleted = subscriptionService.deleteSubscription("org1", "sub1");
         assertNotNull(deleted);
         assertEquals(deleted.getSubscriptionId(), "sub1");
         assertEquals(deleted.getStatus(), SubscriptionStatus.DELETED);
-        verify(subscriptionDAO).deleteSubscriptionAtomic("sub1", "org1", "ACTIVE");
+        verify(subscriptionDAO).deleteSubscriptionAtomic(any(Connection.class), eq("sub1"), eq("org1"), eq("ACTIVE"));
     }
 
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateWebhookSubscriptionInvalidCallbackUrl() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.WEBHOOK, "http://127.0.0.1:8080/callback", "secret123");
@@ -254,8 +280,8 @@ public class SubscriptionServiceImplTest {
         when(configurationService.getEventNotificationAllowedCallbackPorts())
                 .thenReturn(Collections.singleton(9443));
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.WEBHOOK,
@@ -269,7 +295,7 @@ public class SubscriptionServiceImplTest {
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateWebhookSubscriptionRejectsPrivateNetworkTargetByDefault() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.WEBHOOK,
@@ -282,8 +308,8 @@ public class SubscriptionServiceImplTest {
     public void testCreateWebhookSubscriptionAllowsPrivateNetworkTargetWhenConfigured() {
         when(configurationService.isEventNotificationPrivateNetworkCallbackTargetsAllowed()).thenReturn(true);
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.WEBHOOK,
@@ -297,7 +323,7 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testCreateWebhookSubscriptionRequiresSharedSecret() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.WEBHOOK,
@@ -307,13 +333,13 @@ public class SubscriptionServiceImplTest {
                 () -> subscriptionService.createSubscription("org1", "group1", "user-consent", filter, delivery));
         assertEquals(exception.getStatusCode(), 400);
         assertEquals(exception.getDescription(), EventNotificationServiceConstants.SHARED_SECRET_REQUIRED_ERROR_MSG);
-        verify(subscriptionDAO, never()).addSubscription(any(Subscription.class));
+        verify(subscriptionDAO, never()).addSubscription(any(Connection.class), any(Subscription.class));
     }
 
     @Test(expectedExceptions = EventNotificationException.class)
     public void testRetryVerificationForPendingSubscriptionWithoutCallbackUrl() {
         Subscription sub = new Subscription("sub1", "org1", "group1", "t1", "ALL", Collections.emptyList(), "WEBHOOK", null, "secret", "PENDING", new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getSubscriptionById("sub1", "org1")).thenReturn(Optional.of(sub));
+        when(subscriptionDAO.getSubscriptionById(any(Connection.class), eq("sub1"), eq("org1"))).thenReturn(Optional.of(sub));
 
         subscriptionService.retryVerification("org1", "sub1");
     }
@@ -321,14 +347,14 @@ public class SubscriptionServiceImplTest {
     @Test
     public void testCreateWebhookSubscriptionDifferentCallbacksSucceeds() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         Subscription existingSub = new Subscription("sub1", "org1", "org1", "t1", "ALL", Collections.emptyList(),
                 "WEBHOOK", "https://93.184.216.34:443/callback1", "secret1", "ACTIVE",
                 new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic("org1", "t1"))
+        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic(any(Connection.class), eq("org1"), eq("t1")))
                 .thenReturn(Collections.singletonList(existingSub));
-        doNothing().when(subscriptionDAO).addSubscription(any(Subscription.class));
+        doNothing().when(subscriptionDAO).addSubscription(any(Connection.class), any(Subscription.class));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
         DeliveryConfigDTO delivery = new DeliveryConfigDTO(DeliveryMode.WEBHOOK, "https://93.184.216.34:443/callback2", "secret2");
@@ -341,12 +367,12 @@ public class SubscriptionServiceImplTest {
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateWebhookSubscriptionSameCallbackFailsWithConflict() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         Subscription existingSub = new Subscription("sub1", "org1", "org1", "t1", "ALL", Collections.emptyList(),
                 "WEBHOOK", "https://93.184.216.34:443/callback1", "secret1", "ACTIVE",
                 new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic("org1", "t1"))
+        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic(any(Connection.class), eq("org1"), eq("t1")))
                 .thenReturn(Collections.singletonList(existingSub));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
@@ -358,12 +384,12 @@ public class SubscriptionServiceImplTest {
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreatePollSubscriptionWhenWebhookExistsFailsWithConflict() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         Subscription existingSub = new Subscription("sub1", "org1", "org1", "t1", "ALL", Collections.emptyList(),
                 "WEBHOOK", "https://93.184.216.34:443/callback", "secret1", "ACTIVE",
                 new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic("org1", "t1"))
+        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic(any(Connection.class), eq("org1"), eq("t1")))
                 .thenReturn(Collections.singletonList(existingSub));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());
@@ -375,12 +401,12 @@ public class SubscriptionServiceImplTest {
     @Test(expectedExceptions = EventNotificationException.class)
     public void testCreateWebhookSubscriptionWhenPollExistsFailsWithConflict() {
         Topic topic = new Topic("t1", "org1", "user-consent", "desc", "active");
-        when(topicDAO.getTopicByOrgAndName("org1", "user-consent")).thenReturn(Optional.of(topic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq("org1"), eq("user-consent"))).thenReturn(Optional.of(topic));
 
         Subscription existingSub = new Subscription("sub1", "org1", "org1", "t1", "ALL", Collections.emptyList(),
                 "POLL", null, "secret1", "ACTIVE",
                 new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()));
-        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic("org1", "t1"))
+        when(subscriptionDAO.getLiveSubscriptionsByOrgAndTopic(any(Connection.class), eq("org1"), eq("t1")))
                 .thenReturn(Collections.singletonList(existingSub));
 
         FilterDTO filter = new FilterDTO(PurposeFilterMode.ALL, Collections.emptyList());

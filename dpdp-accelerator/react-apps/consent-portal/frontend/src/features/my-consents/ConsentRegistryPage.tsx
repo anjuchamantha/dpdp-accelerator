@@ -55,19 +55,19 @@ function isConsentRelation(value: string): value is ConsentRelation {
 const DEFAULT_PAGE = 0
 const DEFAULT_ROWS_PER_PAGE = 10
 
-function getFiltersFromSearchParams(searchParams: URLSearchParams): ConsentRegistryFiltersModel {
+function getFiltersFromSearchParams(
+  searchParams: URLSearchParams,
+  isPendingView: boolean,
+): ConsentRegistryFiltersModel {
   const stateParam = searchParams.get('state') ?? ''
   const relationParam = searchParams.get('relation') ?? ''
   const state = isConsentState(stateParam) ? (stateParam as ConsentState) : DEFAULT_FILTERS.state
   const urlRelation = isConsentRelation(relationParam) ? relationParam : DEFAULT_FILTERS.relation
-  // The Pending queue is every relation at once - relation narrowing (and
-  // switching away from Pending) happens by leaving this view, not inside it.
-  const relation = state === 'PENDING' ? 'ANY' : urlRelation
 
   return {
     state,
     serviceId: searchParams.get('serviceId') ?? DEFAULT_FILTERS.serviceId,
-    relation,
+    relation: isPendingView ? 'ANY' : urlRelation,
     createdAfter: searchParams.get('createdAfter') ?? DEFAULT_FILTERS.createdAfter,
     createdBefore: searchParams.get('createdBefore') ?? DEFAULT_FILTERS.createdBefore,
   }
@@ -93,8 +93,13 @@ function toSearchParams(
   filters: ConsentRegistryFiltersModel,
   page = DEFAULT_PAGE,
   rowsPerPage = DEFAULT_ROWS_PER_PAGE,
+  isPendingView = false,
 ): URLSearchParams {
   const params = new URLSearchParams()
+
+  if (isPendingView) {
+    params.set('view', 'pending')
+  }
 
   if (filters.state !== DEFAULT_FILTERS.state) {
     params.set('state', filters.state)
@@ -132,7 +137,11 @@ function ConsentRegistryPage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams()
   const [approvalConsentID, setApprovalConsentID] = useState<string>()
   const [revocationConsentID, setRevocationConsentID] = useState<string>()
-  const filters = useMemo(() => getFiltersFromSearchParams(searchParams), [searchParams])
+  const isPendingView = searchParams.get('view') === 'pending'
+  const filters = useMemo(
+    () => getFiltersFromSearchParams(searchParams, isPendingView),
+    [isPendingView, searchParams],
+  )
   const page = useMemo(() => getPageFromSearchParams(searchParams), [searchParams])
   const rowsPerPage = useMemo(() => getRowsPerPageFromSearchParams(searchParams), [searchParams])
   const consentListQuery = useConsentListQuery(filters, page, rowsPerPage)
@@ -147,7 +156,9 @@ function ConsentRegistryPage(): React.JSX.Element {
     nextPage = DEFAULT_PAGE,
     nextRowsPerPage = rowsPerPage,
   ): void => {
-    setSearchParams(toSearchParams(nextFilters, nextPage, nextRowsPerPage), { replace: true })
+    setSearchParams(toSearchParams(nextFilters, nextPage, nextRowsPerPage, isPendingView), {
+      replace: true,
+    })
   }
 
   return (
@@ -156,13 +167,14 @@ function ConsentRegistryPage(): React.JSX.Element {
         <Stack spacing={1}>
           <HeaderBreadcrumbs />
           <Typography variant="h4" fontWeight={700}>
-            {filters.state === 'PENDING' ? t('sidebar.pendingConsents') : t('sidebar.allConsents')}
+            {isPendingView ? t('sidebar.pendingConsents') : t('sidebar.allConsents')}
           </Typography>
         </Stack>
 
         <ConsentRegistryFilters
           key={searchParams.toString()}
           filters={filters}
+          isPendingView={isPendingView}
           onFilterChange={(nextFilters) => updateParams(nextFilters)}
           onClear={() => updateParams(DEFAULT_FILTERS)}
         />

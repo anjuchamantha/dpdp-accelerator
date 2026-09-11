@@ -171,7 +171,9 @@ jobs:
     uses: ./.github/workflows/e2e.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
-      is_source: master
+      # Gate on the pack operators actually install, not product-is master. Also one of the
+      # events allowed to write the pack cache, so this leaves it warm for later PR runs.
+      is_source: s3
     secrets: inherit
 
   build:

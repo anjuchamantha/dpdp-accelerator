@@ -1,0 +1,73 @@
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# WSO2 publishes U2 updates weekly, usually Thursday or Friday. Without this, the cached
+# pack is only rebuilt when its entry happens to evict or expire, so the update level under
+# test drifts at random rather than tracking those releases.
+#
+# Running the whole suite rather than just rebuilding the pack is the point: if a new update
+# breaks the accelerator, this says so on Saturday instead of a random Monday PR going red
+# for reasons unrelated to its diff. A failure here is about the update, not the PR queue.
+name: '[Weekly] Test against latest U2 updated IS and cache the pack'
+
+on:
+  schedule:
+    # Saturday, after the Thu/Fri publish, so Monday's PRs get the new updates. Same slot as
+    # the master job, so the two together read as one weekly checkpoint.
+    - cron: '7 2 * * 6'
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-e2e-is-latest-u2
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Cache entries are immutable - "you cannot change the contents of an existing cache" - so
+  # deleting is the only way to refresh under a stable key. Rotating the key instead would
+  # leave a ~390MB entry behind every week until eviction, which is the same cache churn that
+  # used to make the product-is master build occasionally take 25 minutes.
+  drop-cache:
+    name: Drop the cached pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the pack cache entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          keys=$(gh cache list --repo "${GITHUB_REPOSITORY}" --key is-pack- --json key --jq '.[].key')
+          if [ -z "${keys}" ]; then
+            echo "No is-pack-* entry found; the run below will create one."
+            exit 0
+          fi
+          echo "${keys}" | while read -r k; do
+            echo "Deleting ${k}"
+            gh cache delete "${k}" --repo "${GITHUB_REPOSITORY}"
+          done
+
+  # `schedule` is one of the events permitted to write the cache, so this repopulates the
+  # entry the PR runs restore. Nothing untrusted executes here.
+  refresh:
+    needs: drop-cache
+    uses: ./.github/workflows/e2e.yml
+    with:
+      is_source: s3
+    secrets: inherit

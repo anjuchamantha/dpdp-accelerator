@@ -49,84 +49,84 @@ public class DaoReadPathCoverageTest {
     @Test
     public void exercisesEmptyReadResultsAcrossDaos() throws Exception {
         SubscriptionDAOImpl subscriptions = new SubscriptionDAOImpl();
-        subscriptions.getSubscriptionById("missing", "org");
-        subscriptions.listSubscriptions("org", null, null, null, 20, 0, null);
-        subscriptions.getPurposesBySubscriptionId("sub", "org");
-        subscriptions.countActiveSubscriptionsForTopic("org", "topic");
-        subscriptions.getPurposesBySubscriptionIds(java.util.Collections.singletonList("sub"));
-        subscriptions.hasPendingOrInFlightDeliveries("sub", "org");
-        subscriptions.getPendingSubscriptionsForRecovery(new Timestamp(System.currentTimeMillis()), 10);
+        subscriptions.getSubscriptionById(connection, "missing", "org");
+        subscriptions.listSubscriptions(connection, "org", null, null, null, 20, 0, null);
+        subscriptions.getPurposesBySubscriptionId(connection, "sub", "org");
+        subscriptions.countActiveSubscriptionsForTopic(connection, "org", "topic");
+        subscriptions.getPurposesBySubscriptionIds(connection, java.util.Collections.singletonList("sub"));
+        subscriptions.hasPendingOrInFlightDeliveries(connection, "sub", "org");
+        subscriptions.getPendingSubscriptionsForRecovery(connection, new Timestamp(System.currentTimeMillis()), 10);
 
         TopicDAOImpl topics = new TopicDAOImpl();
-        topics.getTopicById("missing", "org");
-        topics.getTopicByOrgAndName("org", "missing");
-        topics.listTopics("org", null, null, 20, 0, null);
+        topics.getTopicById(connection, "missing", "org");
+        topics.getTopicByOrgAndName(connection, "org", "missing");
+        topics.listTopics(connection, "org", null, null, 20, 0, null);
 
         EventDAOImpl events = new EventDAOImpl();
-        events.getEventById("missing", "org");
-        events.getEventPurposes("event");
-        events.hasActiveEventsForTopic("topic");
-        events.searchEvents("org", null, null, null, null, null, null, 20, 0);
+        events.getEventById(connection, "missing", "org");
+        events.getEventPurposes(connection, "event");
+        events.hasActiveEventsForTopic(connection, "topic");
+        events.searchEvents(connection, "org", null, null, null, null, null, null, 20, 0);
 
         DeliveryDAOImpl deliveries = new DeliveryDAOImpl();
         setConfiguration(deliveries);
-        deliveries.getWebhookDeliveryById("delivery", "org");
-        deliveries.getPendingWebhookDispatchContexts(10);
-        deliveries.getStuckInFlightWebhookDispatchContexts(10, null);
-        deliveries.getPendingPollDeliveries("org", "group", "subscription", 10);
-        deliveries.getWebhookDeliveryAudits("delivery", "org");
-        deliveries.getPollDeliveryById("delivery", "org");
-        deliveries.getOrgDeliveryById("org", "delivery");
-        deliveries.getSubscriptionDeliveryById("org", "sub", "delivery");
-        deliveries.listSubscriptionDeliveries("org", "sub", 10, 0, new int[1]);
-        deliveries.listOrgDeliveries("org", null, null, null, null, null, 10, 0, new int[1]);
-        deliveries.listEventDeliveries("org", "event", 10, 0, new int[1]);
-        deliveries.listOrgDeliveries("org", " delivered ", " sub ", " group ", "one, ,TWO", "a_%",
+        deliveries.getWebhookDeliveryById(connection, "delivery", "org");
+        deliveries.getPendingWebhookDispatchContexts(connection, 10);
+        deliveries.getStuckInFlightWebhookDispatchContexts(connection, 10, null);
+        deliveries.getPendingPollDeliveries(connection, "org", "group", "subscription", 10);
+        deliveries.getWebhookDeliveryAudits(connection, "delivery", "org");
+        deliveries.getPollDeliveryById(connection, "delivery", "org");
+        deliveries.getOrgDeliveryById(connection, "org", "delivery");
+        deliveries.getSubscriptionDeliveryById(connection, "org", "sub", "delivery");
+        deliveries.listSubscriptionDeliveries(connection, "org", "sub", 10, 0, new int[1]);
+        deliveries.listOrgDeliveries(connection, "org", null, null, null, null, null, 10, 0, new int[1]);
+        deliveries.listEventDeliveries(connection, "org", "event", 10, 0, new int[1]);
+        deliveries.listOrgDeliveries(connection, "org", " delivered ", " sub ", " group ", "one, ,TWO", "a_%",
                 10, 0, new int[1]);
-        deliveries.listEventDeliveries("org", "event", 10, 0, null);
+        deliveries.listEventDeliveries(connection, "org", "event", 10, 0, null);
     }
 
     @Test
     public void translatesJdbcFailuresAcrossDaoReadPaths() throws Exception {
         when(statement.executeQuery()).thenThrow(new java.sql.SQLException("expected"));
         SubscriptionDAOImpl subscriptions = new SubscriptionDAOImpl();
-        expectThrows(RuntimeException.class, () -> subscriptions.getSubscriptionById("sub", "org"));
-        expectThrows(RuntimeException.class, () -> subscriptions.listSubscriptions("org", null, null, null, 20, 0, null));
-        expectThrows(RuntimeException.class, () -> subscriptions.getPurposesBySubscriptionId("sub", "org"));
-        expectThrows(RuntimeException.class, () -> subscriptions.countActiveSubscriptionsForTopic("org", "topic"));
-        expectThrows(RuntimeException.class, () -> subscriptions.hasPendingOrInFlightDeliveries("sub", "org"));
-        expectThrows(RuntimeException.class, () -> subscriptions.getPendingSubscriptionsForRecovery(new Timestamp(1), 10));
+        expectThrows(RuntimeException.class, () -> subscriptions.getSubscriptionById(connection, "sub", "org"));
+        expectThrows(RuntimeException.class, () -> subscriptions.listSubscriptions(connection, "org", null, null, null, 20, 0, null));
+        expectThrows(RuntimeException.class, () -> subscriptions.getPurposesBySubscriptionId(connection, "sub", "org"));
+        expectThrows(RuntimeException.class, () -> subscriptions.countActiveSubscriptionsForTopic(connection, "org", "topic"));
+        expectThrows(RuntimeException.class, () -> subscriptions.hasPendingOrInFlightDeliveries(connection, "sub", "org"));
+        expectThrows(RuntimeException.class, () -> subscriptions.getPendingSubscriptionsForRecovery(connection, new Timestamp(1), 10));
 
         TopicDAOImpl topics = new TopicDAOImpl();
-        expectThrows(RuntimeException.class, () -> topics.getTopicById("topic", "org"));
-        expectThrows(RuntimeException.class, () -> topics.getTopicByOrgAndName("org", "name"));
-        expectThrows(RuntimeException.class, () -> topics.listTopics("org", null, null, 20, 0, null));
+        expectThrows(RuntimeException.class, () -> topics.getTopicById(connection, "topic", "org"));
+        expectThrows(RuntimeException.class, () -> topics.getTopicByOrgAndName(connection, "org", "name"));
+        expectThrows(RuntimeException.class, () -> topics.listTopics(connection, "org", null, null, 20, 0, null));
 
         EventDAOImpl events = new EventDAOImpl();
-        expectThrows(RuntimeException.class, () -> events.getEventById("event", "org"));
-        expectThrows(RuntimeException.class, () -> events.getEventPurposes("event"));
-        expectThrows(RuntimeException.class, () -> events.hasActiveEventsForTopic("topic"));
-        expectThrows(RuntimeException.class, () -> events.searchEvents("org", null, null, null, null, null, null, 20, 0));
+        expectThrows(RuntimeException.class, () -> events.getEventById(connection, "event", "org"));
+        expectThrows(RuntimeException.class, () -> events.getEventPurposes(connection, "event"));
+        expectThrows(RuntimeException.class, () -> events.hasActiveEventsForTopic(connection, "topic"));
+        expectThrows(RuntimeException.class, () -> events.searchEvents(connection, "org", null, null, null, null, null, null, 20, 0));
 
         DeliveryDAOImpl deliveries = new DeliveryDAOImpl();
         setConfiguration(deliveries);
-        expectThrows(RuntimeException.class, () -> deliveries.getWebhookDeliveryById("delivery", "org"));
-        expectThrows(RuntimeException.class, () -> deliveries.getPendingWebhookDispatchContexts(10));
+        expectThrows(RuntimeException.class, () -> deliveries.getWebhookDeliveryById(connection, "delivery", "org"));
+        expectThrows(RuntimeException.class, () -> deliveries.getPendingWebhookDispatchContexts(connection, 10));
         expectThrows(RuntimeException.class,
-                () -> deliveries.getPendingPollDeliveries("org", "group", "subscription", 10));
-        expectThrows(RuntimeException.class, () -> deliveries.getWebhookDeliveryAudits("delivery", "org"));
-        expectThrows(RuntimeException.class, () -> deliveries.getPollDeliveryById("delivery", "org"));
-        expectThrows(RuntimeException.class, () -> deliveries.getOrgDeliveryById("org", "delivery"));
+                () -> deliveries.getPendingPollDeliveries(connection, "org", "group", "subscription", 10));
+        expectThrows(RuntimeException.class, () -> deliveries.getWebhookDeliveryAudits(connection, "delivery", "org"));
+        expectThrows(RuntimeException.class, () -> deliveries.getPollDeliveryById(connection, "delivery", "org"));
+        expectThrows(RuntimeException.class, () -> deliveries.getOrgDeliveryById(connection, "org", "delivery"));
     }
 
     @Test
     public void coversEmptyInputReadGuards() throws Exception {
         DeliveryDAOImpl deliveries = new DeliveryDAOImpl();
         setConfiguration(deliveries);
-        org.testng.Assert.assertTrue(deliveries.listEventDeliveries(null, "event", 10, 0, null).isEmpty());
-        org.testng.Assert.assertTrue(deliveries.listEventDeliveries("org", "", 10, 0, null).isEmpty());
+        org.testng.Assert.assertTrue(deliveries.listEventDeliveries(connection, null, "event", 10, 0, null).isEmpty());
+        org.testng.Assert.assertTrue(deliveries.listEventDeliveries(connection, "org", "", 10, 0, null).isEmpty());
         org.testng.Assert.assertTrue(new SubscriptionDAOImpl()
-                .getPurposesBySubscriptionIds(Collections.emptyList()).isEmpty());
+                .getPurposesBySubscriptionIds(connection, Collections.emptyList()).isEmpty());
     }
 
     private void setConfiguration(DeliveryDAOImpl dao) throws Exception {

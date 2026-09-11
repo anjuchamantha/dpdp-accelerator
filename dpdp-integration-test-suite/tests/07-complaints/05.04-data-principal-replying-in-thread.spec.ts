@@ -27,11 +27,11 @@ import { uniqueMarker } from '../../utils/testData'
  * toggle - a Data Principal can only ever post a public reply, unlike the officer surface in
  * 05.07-officer-replying-in-thread.spec.ts).
  *
- * ComplaintDetailPage.tsx's onSend only attaches a toStatus when the complaint is currently
- * WAITING_ON_CLIENT (the one case StatusTransitionValidator.java actually allows a reply to
- * auto-advance: WAITING_ON_CLIENT -> AWAITING_INTERNAL_REVIEW) - see 05.04.05. Every other status
- * (OPEN, IN_PROGRESS, RESOLVED) posts the reply with no toStatus at all and is left unchanged -
- * see 05.04.04 and 05.04.06.
+ * ComplaintDetailPage.tsx's onSend attaches a toStatus of AWAITING_INTERNAL_REVIEW in the two
+ * cases StatusTransitionValidator.java allows a reply to auto-advance - WAITING_ON_CLIENT (the
+ * officer asked for information, see 05.04.05) and RESOLVED (a reply is the only way a closed
+ * complaint reopens, see 05.04.08). Every other status (OPEN, IN_PROGRESS) posts the reply with
+ * no toStatus at all and is left unchanged - see 05.04.04 and 05.04.06.
  */
 test.describe('Data Principal replying in a complaint thread (UI)', () => {
   test('05.04.01 - Sending a reply appends it to the activity feed', async ({
@@ -177,6 +177,30 @@ test.describe('Data Principal replying in a complaint thread (UI)', () => {
     await detailPage.attachFile('second.png', 'image/png')
     await expect(detailPage.stagedAttachmentName('second.png')).toBeVisible()
     await expect(detailPage.stagedAttachmentName('first.pdf')).not.toBeVisible()
+    await dataPrincipalPage.context().close()
+  })
+
+  test('05.04.08 - Replying to a resolved complaint reopens it for internal review', async ({
+    browser,
+    userComplaintApi,
+    officerComplaintApi,
+  }) => {
+    // RESOLVED is the one status an officer cannot manually transition out of
+    // (StatusTransitionValidator.java allows only RESOLVED -> AWAITING_INTERNAL_REVIEW), so a
+    // reply here is the sole way a closed complaint reopens. OPEN -> RESOLVED is not a direct
+    // transition either, hence the explicit IN_PROGRESS hop that moveComplaintToStatus only
+    // automates for AWAITING_INTERNAL_REVIEW.
+    const seeded = await seedComplaint(userComplaintApi, 'OTHER', 'reply-from-resolved')
+    await moveComplaintToStatus(officerComplaintApi, seeded.id, 'IN_PROGRESS')
+    await moveComplaintToStatus(officerComplaintApi, seeded.id, 'RESOLVED')
+
+    const dataPrincipalPage = await loginAsUser(browser)
+    const detailPage = new ComplaintDetailPage(dataPrincipalPage)
+    await detailPage.goto(seeded.id)
+    await expect(detailPage.resolvedBanner).toBeVisible()
+
+    await detailPage.sendReply(`This was not actually resolved: ${uniqueMarker('resolved-reply')}`)
+    await expect(detailPage.chipWithLabel('Waiting on Internal Review')).toBeVisible()
     await dataPrincipalPage.context().close()
   })
 })

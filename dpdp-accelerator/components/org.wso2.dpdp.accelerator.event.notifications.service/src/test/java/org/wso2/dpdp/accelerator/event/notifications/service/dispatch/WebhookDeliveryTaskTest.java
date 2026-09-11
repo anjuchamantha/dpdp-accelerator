@@ -79,11 +79,36 @@ public class WebhookDeliveryTaskTest {
     @Mock
     private EventPayloadSigner payloadSigner;
 
+    @Mock
+    private java.sql.Connection connection;
+
     @BeforeMethod
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
+        javax.sql.DataSource dataSource = org.mockito.Mockito.mock(javax.sql.DataSource.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        setStaticInstance(null);
+        setStaticDataSource(dataSource);
         when(configurationService.getEventNotificationMaxRetries()).thenReturn(5);
         when(configurationService.getEventNotificationBaseBackoffSeconds()).thenReturn(5L);
+    }
+
+    @org.testng.annotations.AfterMethod
+    public void tearDown() throws Exception {
+        setStaticDataSource(null);
+        setStaticInstance(null);
+    }
+
+    private static void setStaticDataSource(javax.sql.DataSource dataSource) throws Exception {
+        java.lang.reflect.Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class.getDeclaredField("dataSource");
+        field.setAccessible(true);
+        field.set(null, dataSource);
+    }
+
+    private static void setStaticInstance(org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager instance) throws Exception {
+        java.lang.reflect.Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        field.set(null, instance);
     }
 
     private WebhookDelivery delivery(int attemptCount) {
@@ -182,13 +207,13 @@ public class WebhookDeliveryTaskTest {
     public void testSuccessMarksDeliveredAndWritesAudit() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.recordSuccessfulAttempt(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery).run();
 
         ArgumentCaptor<WebhookDeliveryAudit> auditCaptor = ArgumentCaptor.forClass(WebhookDeliveryAudit.class);
         ArgumentCaptor<WebhookDelivery> updatedCaptor = ArgumentCaptor.forClass(WebhookDelivery.class);
-        verify(deliveryDAO).recordSuccessfulAttempt(auditCaptor.capture(), updatedCaptor.capture());
+        verify(deliveryDAO).recordSuccessfulAttempt(any(java.sql.Connection.class), auditCaptor.capture(), updatedCaptor.capture());
 
         WebhookDelivery updated = updatedCaptor.getValue();
         assertEquals(updated.getStatus(), "delivered");
@@ -201,7 +226,7 @@ public class WebhookDeliveryTaskTest {
         assertEquals(audit.getDeliveryId(), DELIVERY_ID);
 
         // On success we never release.
-        verify(deliveryDAO, never()).recordRetryableFailure(any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
+        verify(deliveryDAO, never()).recordRetryableFailure(any(java.sql.Connection.class), any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
     }
 
     @Test
@@ -209,7 +234,7 @@ public class WebhookDeliveryTaskTest {
         // attempt 0 → fails → newAttempt = 1, which is below maxRetries (default 5).
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(500);
-        when(deliveryDAO.recordRetryableFailure(any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
+        when(deliveryDAO.recordRetryableFailure(any(java.sql.Connection.class), any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
                 .thenReturn(true);
 
         task(delivery).run();
@@ -219,7 +244,7 @@ public class WebhookDeliveryTaskTest {
         ArgumentCaptor<Integer> attemptCaptor = ArgumentCaptor.forClass(Integer.class);
         ArgumentCaptor<Timestamp> nextCaptor = ArgumentCaptor.forClass(Timestamp.class);
 
-        verify(deliveryDAO).recordRetryableFailure(auditCaptor.capture(), idCaptor.capture(), attemptCaptor.capture(), nextCaptor.capture());
+        verify(deliveryDAO).recordRetryableFailure(any(java.sql.Connection.class), auditCaptor.capture(), idCaptor.capture(), attemptCaptor.capture(), nextCaptor.capture());
         assertEquals(auditCaptor.getValue().getResponseCode(), "500");
         assertEquals(idCaptor.getValue(), DELIVERY_ID);
         assertEquals(attemptCaptor.getValue().intValue(), 1);
@@ -230,44 +255,59 @@ public class WebhookDeliveryTaskTest {
                 "expected ~5s backoff, got " + delayMs + "ms");
 
         // We don't mark as delivered or failed on a retryable failure.
-        verify(deliveryDAO, never()).recordSuccessfulAttempt(any(), any());
-        verify(deliveryDAO, never()).recordPermanentFailure(any(), any());
+        verify(deliveryDAO, never()).recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any());
+        verify(deliveryDAO, never()).recordPermanentFailure(any(java.sql.Connection.class), any(), any());
     }
 
     @Test
     public void testExceptionIsTreatedAsRetryableFailure() throws Exception {
         WebhookDelivery delivery = delivery(2);
         stubHttpException(new IOException("boom"));
-        when(deliveryDAO.recordRetryableFailure(any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
+        when(deliveryDAO.recordRetryableFailure(any(java.sql.Connection.class), any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
                 .thenReturn(true);
 
         task(delivery).run();
 
         ArgumentCaptor<WebhookDeliveryAudit> auditCaptor = ArgumentCaptor.forClass(WebhookDeliveryAudit.class);
-        verify(deliveryDAO).recordRetryableFailure(auditCaptor.capture(), eq(DELIVERY_ID), org.mockito.ArgumentMatchers.eq(3), any());
+        verify(deliveryDAO).recordRetryableFailure(any(java.sql.Connection.class), auditCaptor.capture(), eq(DELIVERY_ID), org.mockito.ArgumentMatchers.eq(3), any());
         assertEquals(auditCaptor.getValue().getResponseCode(), "EXCEPTION");
     }
 
     @Test
-    public void testFifthFailedAttemptMarksTerminalFailed() throws Exception {
-        // attempt 4 → fails → newAttempt = 5, which equals maxRetries (default) → failed.
+    public void testFifthFailedAttemptSchedulesFifthAndFinalRetry() throws Exception {
+        // attempt 4 → fails → newAttempt = 5, which equals maxRetries (default) → retry once more.
         WebhookDelivery delivery = delivery(4);
         stubHttpResponse(500);
-        when(deliveryDAO.recordPermanentFailure(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordRetryableFailure(any(java.sql.Connection.class), any(), anyString(),
+                org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
+
+        task(delivery).run();
+
+        verify(deliveryDAO).recordRetryableFailure(any(java.sql.Connection.class), any(), eq(DELIVERY_ID),
+                org.mockito.ArgumentMatchers.eq(5), any());
+        verify(deliveryDAO, never()).recordPermanentFailure(any(java.sql.Connection.class), any(), any());
+    }
+
+    @Test
+    public void testSixthFailedAttemptMarksTerminalFailed() throws Exception {
+        // attempt 5 → fails → newAttempt = 6, exceeding five retries → terminal failure.
+        WebhookDelivery delivery = delivery(5);
+        stubHttpResponse(500);
+        when(deliveryDAO.recordPermanentFailure(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery).run();
 
         ArgumentCaptor<WebhookDeliveryAudit> auditCaptor = ArgumentCaptor.forClass(WebhookDeliveryAudit.class);
         ArgumentCaptor<WebhookDelivery> updatedCaptor = ArgumentCaptor.forClass(WebhookDelivery.class);
-        verify(deliveryDAO).recordPermanentFailure(auditCaptor.capture(), updatedCaptor.capture());
+        verify(deliveryDAO).recordPermanentFailure(any(java.sql.Connection.class), auditCaptor.capture(), updatedCaptor.capture());
 
         assertEquals(updatedCaptor.getValue().getStatus(), "failed");
-        assertEquals(updatedCaptor.getValue().getAttemptCount(), 5);
+        assertEquals(updatedCaptor.getValue().getAttemptCount(), 6);
         assertNull(updatedCaptor.getValue().getNextRetryAt());
         assertEquals(auditCaptor.getValue().getResponseCode(), "500");
 
         // On terminal failure we never release for a retry.
-        verify(deliveryDAO, never()).recordRetryableFailure(any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
+        verify(deliveryDAO, never()).recordRetryableFailure(any(java.sql.Connection.class), any(), anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
     }
 
     @Test
@@ -278,14 +318,14 @@ public class WebhookDeliveryTaskTest {
         d2.setDeliveryId("deliv-2");
 
         stubHttpResponse(200);
-        when(deliveryDAO.recordSuccessfulAttempt(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(d1).run();
         task(d2).run();
 
         ArgumentCaptor<WebhookDeliveryAudit> captor = ArgumentCaptor.forClass(WebhookDeliveryAudit.class);
         ArgumentCaptor<WebhookDelivery> devCaptor = ArgumentCaptor.forClass(WebhookDelivery.class);
-        verify(deliveryDAO, times(2)).recordSuccessfulAttempt(captor.capture(), devCaptor.capture());
+        verify(deliveryDAO, times(2)).recordSuccessfulAttempt(any(java.sql.Connection.class), captor.capture(), devCaptor.capture());
         java.util.List<WebhookDeliveryAudit> rows = captor.getAllValues();
         assertEquals(rows.size(), 2);
         // Different UUIDs for each.
@@ -301,8 +341,7 @@ public class WebhookDeliveryTaskTest {
     public void testRequestBodyIsEnvelopeNotRawPayload() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
-        when(deliveryDAO.addWebhookDeliveryAudit(any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery, "{\"hello\":\"world\"}").run();
 
@@ -319,8 +358,7 @@ public class WebhookDeliveryTaskTest {
     public void testEnvelopeCarriesAllRoutingFields() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
-        when(deliveryDAO.addWebhookDeliveryAudit(any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery, "{\"k\":\"v\"}").run();
 
@@ -338,8 +376,7 @@ public class WebhookDeliveryTaskTest {
     public void testEventSignatureIsHmacOfEnvelope() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
-        when(deliveryDAO.addWebhookDeliveryAudit(any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery, "{\"hello\":\"world\"}").run();
 
@@ -363,7 +400,7 @@ public class WebhookDeliveryTaskTest {
     public void testCertificateSignedPayloadEmbedsCompleteEventWithoutUnsignedCopy() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.recordSuccessfulAttempt(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
         when(configurationService.isEventNotificationPayloadSigningEnabled()).thenReturn(true);
         when(configurationService.getEventNotificationPayloadSigningAudience())
                 .thenReturn("dpdp-event-notifications");
@@ -408,12 +445,12 @@ public class WebhookDeliveryTaskTest {
                 .thenReturn("dpdp-event-notifications");
         when(payloadSigner.sign(any(EventPayloadSigningContext.class)))
                 .thenThrow(new IllegalStateException("issuer unavailable"));
-        when(deliveryDAO.recordRetryableFailure(any(), anyString(), anyInt(), any())).thenReturn(true);
+        when(deliveryDAO.recordRetryableFailure(any(java.sql.Connection.class), any(), anyString(), anyInt(), any())).thenReturn(true);
 
         task(delivery, "{\"hello\":\"world\"}").run();
 
         verify(httpClient, never()).send(any(), any());
-        verify(deliveryDAO).recordRetryableFailure(any(), eq(DELIVERY_ID), eq(1), any());
+        verify(deliveryDAO).recordRetryableFailure(any(java.sql.Connection.class), any(), eq(DELIVERY_ID), eq(1), any());
     }
 
     @Test
@@ -423,8 +460,7 @@ public class WebhookDeliveryTaskTest {
         // match HMAC(payload) and this test will fail.
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
-        when(deliveryDAO.addWebhookDeliveryAudit(any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         String rawPayload = "{\"hello\":\"world\"}";
         task(delivery, rawPayload).run();
@@ -442,8 +478,7 @@ public class WebhookDeliveryTaskTest {
     public void testDeliveryIdHeaderIsSetForDedupe() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
-        when(deliveryDAO.addWebhookDeliveryAudit(any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery).run();
 
@@ -456,8 +491,7 @@ public class WebhookDeliveryTaskTest {
     public void testContentTypeIsJson() throws Exception {
         WebhookDelivery delivery = delivery(0);
         stubHttpResponse(200);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
-        when(deliveryDAO.addWebhookDeliveryAudit(any())).thenReturn(true);
+        when(deliveryDAO.recordSuccessfulAttempt(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery).run();
 
@@ -468,33 +502,33 @@ public class WebhookDeliveryTaskTest {
     @Test
     public void testUnparseablePayloadIsMarkedAsPermanentFailure() throws Exception {
         WebhookDelivery delivery = delivery(0);
-        when(deliveryDAO.recordPermanentFailure(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordPermanentFailure(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery, "not-json-at-all").run();
 
-        verify(deliveryDAO).recordPermanentFailure(any(), any());
+        verify(deliveryDAO).recordPermanentFailure(any(java.sql.Connection.class), any(), any());
         verify(httpClient, never()).send(any(), any());
     }
 
     @Test
     public void testNullPayloadIsMarkedAsPermanentFailure() throws Exception {
         WebhookDelivery delivery = delivery(0);
-        when(deliveryDAO.recordPermanentFailure(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordPermanentFailure(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery, null).run();
 
-        verify(deliveryDAO).recordPermanentFailure(any(), any());
+        verify(deliveryDAO).recordPermanentFailure(any(java.sql.Connection.class), any(), any());
         verify(httpClient, never()).send(any(), any());
     }
 
     @Test
     public void testMissingSharedSecretFailsPermanentlyWithoutSendingHttpRequest() throws Exception {
-        when(deliveryDAO.recordPermanentFailure(any(), any())).thenReturn(true);
+        when(deliveryDAO.recordPermanentFailure(any(java.sql.Connection.class), any(), any())).thenReturn(true);
 
         task(delivery(0), "{\"hello\":\"world\"}", " ").run();
 
         ArgumentCaptor<WebhookDeliveryAudit> auditCaptor = ArgumentCaptor.forClass(WebhookDeliveryAudit.class);
-        verify(deliveryDAO).recordPermanentFailure(auditCaptor.capture(), any());
+        verify(deliveryDAO).recordPermanentFailure(any(java.sql.Connection.class), auditCaptor.capture(), any());
         assertEquals(auditCaptor.getValue().getResponseCode(), "MISSING_SECRET");
         verify(httpClient, never()).send(any(), any());
     }

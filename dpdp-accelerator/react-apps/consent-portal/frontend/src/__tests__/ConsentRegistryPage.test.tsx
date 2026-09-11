@@ -244,10 +244,10 @@ describe('ConsentRegistryPage', () => {
     })
   })
 
-  it('shows the pending title and breadcrumb when filtered to pending consents', async () => {
+  it('shows the dedicated pending title and breadcrumb for the pending view', async () => {
     mockConsentSearch([])
 
-    renderConsentRegistryPage(createQueryClient(), '/consents?state=PENDING')
+    renderConsentRegistryPage(createQueryClient(), '/consents?view=pending&state=PENDING')
 
     expect(await screen.findByRole('heading', { name: 'My Pending Consents' })).toBeInTheDocument()
     const breadcrumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
@@ -257,20 +257,36 @@ describe('ConsentRegistryPage', () => {
     )
   })
 
-  it('locks state and relation to the pending queue - narrowing either means leaving this view', async () => {
+  it('keeps state and relation filters enabled when pending is selected from My Consents', async () => {
     mockConsentSearch([])
 
     renderConsentRegistryPage(createQueryClient(), '/consents?state=PENDING&relation=AUTHORIZER')
 
+    await screen.findByRole('heading', { name: 'My Consents' })
+    expect(screen.getByRole('combobox', { name: 'State' })).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('combobox', { name: 'Relation' })).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('combobox', { name: 'Relation' })).toHaveTextContent('Managed by Me')
+    expect(consentsApi.fetchMyConsents.mock.calls[0]?.[0]).toMatchObject({
+      state: 'PENDING',
+      relation: 'AUTHORIZER',
+    })
+  })
+
+  it('keeps the dedicated pending view filters locked and relation-wide', async () => {
+    mockConsentSearch([])
+
+    renderConsentRegistryPage(createQueryClient(), '/consents?view=pending&state=PENDING')
+
     await screen.findByRole('heading', { name: 'My Pending Consents' })
     expect(screen.getByRole('combobox', { name: 'State' })).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByRole('combobox', { name: 'Relation' })).toHaveTextContent('All')
     expect(screen.getByRole('combobox', { name: 'Relation' })).toHaveAttribute(
       'aria-disabled',
       'true',
     )
-    // Relation is forced to ANY server-side too, not just visually locked.
-    expect(consentsApi.fetchMyConsents.mock.calls[0]?.[0]).toMatchObject({ relation: 'ANY' })
+    expect(consentsApi.fetchMyConsents.mock.calls[0]?.[0]).toMatchObject({
+      state: 'PENDING',
+      relation: 'ANY',
+    })
   })
 
   it('ignores the removed CREATED status in the URL', async () => {

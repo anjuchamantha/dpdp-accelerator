@@ -51,7 +51,7 @@ describe('current-user API', () => {
     })
 
     await expect(fetchCurrentUser()).resolves.toEqual({
-      userId: 'user-1',
+      userId: 'admin@acme.com',
       organizationId: 'acme.com',
       hideSelfConsentsForAdmins: true,
       scopes: ['openid', IS_SCOPES.LOGIN, IS_SCOPES.CONSENT_VIEW],

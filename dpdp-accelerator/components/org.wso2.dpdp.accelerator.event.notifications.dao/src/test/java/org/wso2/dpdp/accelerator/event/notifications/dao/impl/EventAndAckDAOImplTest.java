@@ -59,9 +59,9 @@ public class EventAndAckDAOImplTest {
         assertTrue(dao.addEvent(connection, event));
         dao.addEventPurposes(connection, "event-1", java.util.Arrays.asList("marketing", " ", null));
         assertEquals(dao.getEventPurposes(connection, "event-1"), Collections.singletonList("marketing"));
-        assertTrue(dao.hasActiveEventsForTopic("topic-1"));
-        assertTrue(dao.getEventById("event-1", "org-1").isPresent());
-        assertFalse(dao.getEventById("missing", "org-1").isPresent());
+        assertTrue(dao.hasActiveEventsForTopic(connection, "topic-1"));
+        assertTrue(dao.getEventById(connection, "event-1", "org-1").isPresent());
+        assertFalse(dao.getEventById(connection, "missing", "org-1").isPresent());
     }
 
     @Test
@@ -69,9 +69,9 @@ public class EventAndAckDAOImplTest {
         DeliveryAckDAOImpl dao = new DeliveryAckDAOImpl();
         WebhookDeliveryAck ack = new WebhookDeliveryAck("ack-1", "delivery-1",
                 new Timestamp(System.currentTimeMillis()), "completed", "200");
-        assertTrue(dao.addDeliveryAck(ack));
-        assertEquals(dao.getDeliveryAckByDeliveryId("delivery-1").get().getAckId(), "ack-1");
-        assertFalse(dao.getDeliveryAckByDeliveryId("missing").isPresent());
+        assertTrue(dao.addDeliveryAck(connection, ack));
+        assertEquals(dao.getDeliveryAckByDeliveryId(connection, "delivery-1").get().getAckId(), "ack-1");
+        assertFalse(dao.getDeliveryAckByDeliveryId(connection, "missing").isPresent());
     }
 
     @Test
@@ -88,9 +88,9 @@ public class EventAndAckDAOImplTest {
                 + "VALUES ('delivery-2', 'sub-2', 'event-1', 'failed')");
 
         EventDAOImpl dao = new EventDAOImpl();
-        assertEquals(dao.searchEvents("org-1", null, "failed", null, "sub-1", null, null, 20, 0)
+        assertEquals(dao.searchEvents(connection, "org-1", null, "failed", null, "sub-1", null, null, 20, 0)
                 .getTotal(), 0);
-        assertEquals(dao.searchEvents("org-1", null, "delivered", null, "sub-1", null, null, 20, 0)
+        assertEquals(dao.searchEvents(connection, "org-1", null, "delivered", null, "sub-1", null, null, 20, 0)
                 .getTotal(), 1);
     }
 

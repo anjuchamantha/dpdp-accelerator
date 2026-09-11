@@ -26,6 +26,7 @@ import org.testng.annotations.Test;
 import org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryDAO;
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
 import java.net.http.HttpClient;
+import java.sql.Connection;
 import java.sql.Timestamp;
 import java.util.Collections;
 import java.util.concurrent.ScheduledExecutorService;
@@ -51,21 +52,50 @@ public class WebhookDeliveryWorkerStuckRecoveryTest {
         @Mock
         private DPDPConfigurationService configurationService;
 
+        @Mock
+        private Connection connection;
+
         private WebhookDeliveryWorker worker;
 
         @BeforeMethod
-        public void setUp() {
+        public void setUp() throws Exception {
                 MockitoAnnotations.openMocks(this);
+                javax.sql.DataSource dataSource = org.mockito.Mockito.mock(javax.sql.DataSource.class);
+                when(dataSource.getConnection()).thenReturn(connection);
+                setStaticInstance(null);
+                setStaticDataSource(dataSource);
                 when(configurationService.getEventNotificationDeliveryWorkerBatchSize()).thenReturn(50);
                 when(configurationService.getEventNotificationStuckInFlightThresholdSeconds()).thenReturn(10);
                 worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         }
 
+        @org.testng.annotations.AfterMethod
+        public void tearDown() throws Exception {
+                setStaticDataSource(null);
+                setStaticInstance(null);
+        }
+
+        private static void setStaticDataSource(javax.sql.DataSource dataSource) throws Exception {
+                java.lang.reflect.Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class
+                                .getDeclaredField("dataSource");
+                field.setAccessible(true);
+                field.set(null, dataSource);
+        }
+
+        private static void setStaticInstance(
+                        org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager instance) throws Exception {
+                java.lang.reflect.Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class
+                                .getDeclaredField("instance");
+                field.setAccessible(true);
+                field.set(null, instance);
+        }
+
         @Test
         public void testStuckRecoveryPassAppliesTimestampCutoff() {
-                when(deliveryDAO.getPendingWebhookDispatchContexts(any(Integer.class)))
+                when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), any(Integer.class)))
                                 .thenReturn(Collections.emptyList());
-                when(deliveryDAO.getStuckInFlightWebhookDispatchContexts(any(Integer.class), any(Timestamp.class)))
+                when(deliveryDAO.getStuckInFlightWebhookDispatchContexts(any(Connection.class), any(Integer.class),
+                                any(Timestamp.class)))
                                 .thenReturn(Collections.emptyList());
 
                 int[] result = worker.runTick();
@@ -74,7 +104,8 @@ public class WebhookDeliveryWorkerStuckRecoveryTest {
                 assertEquals(result[1], 0);
 
                 ArgumentCaptor<Timestamp> cutoffCaptor = ArgumentCaptor.forClass(Timestamp.class);
-                verify(deliveryDAO).getStuckInFlightWebhookDispatchContexts(anyInt(), cutoffCaptor.capture());
+                verify(deliveryDAO).getStuckInFlightWebhookDispatchContexts(any(Connection.class), anyInt(),
+                                cutoffCaptor.capture());
 
                 Timestamp cutoff = cutoffCaptor.getValue();
                 long thresholdMs = configurationService.getEventNotificationStuckInFlightThresholdSeconds() * 1000L;

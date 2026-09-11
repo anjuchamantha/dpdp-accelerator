@@ -31,12 +31,10 @@ import org.osgi.service.component.annotations.ReferencePolicy;
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
 import org.wso2.dpdp.accelerator.event.notifications.common.listener.DPDPLifecycleEventListener;
 import org.wso2.dpdp.accelerator.event.notifications.dao.EventNotificationDAOProvider;
-import org.wso2.dpdp.accelerator.event.notifications.service.EventFanOutService;
 import org.wso2.dpdp.accelerator.event.notifications.service.EventPublishService;
 import org.wso2.dpdp.accelerator.event.notifications.service.SubscriptionService;
 import org.wso2.dpdp.accelerator.event.notifications.service.TopicService;
 import org.wso2.dpdp.accelerator.event.notifications.service.dispatch.SignedEventPayloadFactory;
-import org.wso2.dpdp.accelerator.event.notifications.service.impl.EventFanOutServiceImpl;
 import org.wso2.dpdp.accelerator.event.notifications.service.impl.EventPublishServiceImpl;
 import org.wso2.dpdp.accelerator.event.notifications.service.impl.SubscriptionServiceImpl;
 import org.wso2.dpdp.accelerator.event.notifications.service.impl.TopicServiceImpl;
@@ -76,10 +74,8 @@ public class EventNotificationServiceComponent {
         subscriptionService = new SubscriptionServiceImpl(
                 daoProvider.getSubscriptionDAO(), daoProvider.getTopicDAO(), daoProvider.getDeliveryDAO(),
                 daoProvider.getDeliveryAckDAO(), configurationService);
-        EventFanOutService eventFanOutService =
-                new EventFanOutServiceImpl(daoProvider.getSubscriptionDAO(), daoProvider.getDeliveryDAO());
         EventPublishService eventPublishService = new EventPublishServiceImpl(
-                daoProvider.getEventDAO(), daoProvider.getTopicDAO(), eventFanOutService,
+                daoProvider.getEventDAO(), daoProvider.getTopicDAO(),
                 daoProvider.getDeliveryDAO(), daoProvider.getDeliveryAckDAO(), daoProvider.getSubscriptionDAO(),
                 configurationService, new SignedEventPayloadFactory());
         deliveryRecoveryService = new DeliveryRecoveryService(

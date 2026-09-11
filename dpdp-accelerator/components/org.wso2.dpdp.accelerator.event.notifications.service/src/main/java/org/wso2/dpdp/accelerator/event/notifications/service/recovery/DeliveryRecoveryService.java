@@ -19,6 +19,7 @@
 package org.wso2.dpdp.accelerator.event.notifications.service.recovery;
 
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
+import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.common.util.LogSanitizer;
 import org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.SubscriptionDAO;
@@ -26,6 +27,8 @@ import org.wso2.dpdp.accelerator.event.notifications.dao.model.Subscription;
 import org.wso2.dpdp.accelerator.event.notifications.service.SubscriptionService;
 import org.wso2.dpdp.accelerator.event.notifications.service.constants.EventNotificationServiceConstants;
 import org.wso2.dpdp.accelerator.event.notifications.service.dispatch.WebhookDeliveryWorker;
+
+import java.net.http.HttpClient;
 
 import java.sql.Timestamp;
 import java.util.List;
@@ -166,7 +169,15 @@ public class DeliveryRecoveryService {
                     - configurationService.getEventNotificationPendingSubscriptionRecoveryThresholdSeconds()
                     * 1000L);
             int batchSize = configurationService.getEventNotificationPendingSubscriptionRecoveryBatchSize();
-            List<Subscription> pendingSubs = subscriptionDAO.getPendingSubscriptionsForRecovery(threshold, batchSize);
+            List<Subscription> pendingSubs;
+            try {
+                pendingSubs = DatabaseUtils.executeInTransaction(conn ->
+                        subscriptionDAO.getPendingSubscriptionsForRecovery(conn, threshold, batchSize));
+            } catch (RuntimeException e) {
+                LOG.error("Failed to fetch pending subscriptions for recovery: "
+                        + LogSanitizer.sanitize(e.getMessage()), e);
+                return;
+            }
             for (Subscription sub : pendingSubs) {
                 if (sub.getCallbackUrl() != null && !sub.getCallbackUrl().trim().isEmpty()) {
                     try {

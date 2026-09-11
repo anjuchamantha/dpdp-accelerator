@@ -23,7 +23,6 @@ import org.wso2.dpdp.accelerator.event.notifications.common.constants.EventNotif
 import org.wso2.dpdp.accelerator.event.notifications.common.enums.PollStatus;
 import org.wso2.dpdp.accelerator.event.notifications.common.exception.EventNotificationDataAccessException;
 import org.wso2.dpdp.accelerator.event.notifications.dao.constants.EventNotificationDBColumns;
-import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.PollDelivery;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.PollDeliveryError;
@@ -65,10 +64,6 @@ public class DeliveryDAOImpl implements DeliveryDAO {
         return EventNotificationQueryFactory.getQueryProvider(conn);
     }
 
-    private EventNotificationCommonDBQueries getQueries() {
-        return EventNotificationQueryFactory.getQueryProvider();
-    }
-
     @Override
     public boolean addWebhookDelivery(Connection conn, WebhookDelivery delivery) {
         if (conn == null) {
@@ -94,148 +89,132 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public Optional<WebhookDelivery> getWebhookDeliveryById(String deliveryId, String orgId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetWebhookDeliveryByIdAndOrgQuery())) {
-                ps.setString(1, deliveryId);
-                ps.setString(2, orgId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return Optional.of(new WebhookDelivery(
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
-                                rs.getString(EventNotificationDBColumns.EVENT_ID),
-                                rs.getString(EventNotificationDBColumns.STATUS),
-                                rs.getInt(EventNotificationDBColumns.ATTEMPT_COUNT),
-                                rs.getTimestamp(EventNotificationDBColumns.NEXT_RETRY_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.DELIVERED_AT)));
-                    }
+    public Optional<WebhookDelivery> getWebhookDeliveryById(Connection conn, String deliveryId, String orgId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetWebhookDeliveryByIdAndOrgQuery())) {
+            ps.setString(1, deliveryId);
+            ps.setString(2, orgId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    WebhookDelivery delivery = new WebhookDelivery(
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
+                            rs.getString(EventNotificationDBColumns.EVENT_ID),
+                            rs.getString(EventNotificationDBColumns.STATUS),
+                            rs.getInt(EventNotificationDBColumns.ATTEMPT_COUNT),
+                            rs.getTimestamp(EventNotificationDBColumns.NEXT_RETRY_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.DELIVERED_AT));
+                    return Optional.of(delivery);
                 }
-                return Optional.empty();
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_WEBHOOK_DELIVERY, deliveryId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_WEBHOOK_DELIVERY, deliveryId), e);
         }
     }
 
     @Override
-    public List<WebhookDeliveryDispatchContext> getPendingWebhookDispatchContexts(int limit) {
-        return loadDispatchContexts(getQueries().getGetPendingWebhookDispatchContextsQuery(), limit);
+    public List<WebhookDeliveryDispatchContext> getPendingWebhookDispatchContexts(Connection conn, int limit) {
+        return loadDispatchContexts(conn, getQueries(conn).getGetPendingWebhookDispatchContextsQuery(), limit);
     }
 
     @Override
-    public List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(int limit) {
+    public List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(Connection conn, int limit) {
         int threshold = getConfiguration().getEventNotificationStuckInFlightThresholdSeconds();
         Timestamp cutoff = new Timestamp(System.currentTimeMillis() - threshold * 1000L);
-        return getStuckInFlightWebhookDispatchContexts(limit, cutoff);
+        return getStuckInFlightWebhookDispatchContexts(conn, limit, cutoff);
     }
 
     @Override
-    public List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(int limit, Timestamp updatedBefore) {
-        return loadDispatchContextsWithCutoff(getQueries().getGetStuckInFlightWebhookDispatchContextsQuery(), limit, updatedBefore);
+    public List<WebhookDeliveryDispatchContext> getStuckInFlightWebhookDispatchContexts(Connection conn, int limit, Timestamp updatedBefore) {
+        return loadDispatchContextsWithCutoff(conn, getQueries(conn).getGetStuckInFlightWebhookDispatchContextsQuery(), limit, updatedBefore);
     }
 
-    private List<WebhookDeliveryDispatchContext> loadDispatchContexts(String sql, int limit) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            List<WebhookDeliveryDispatchContext> list = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setInt(1, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        WebhookDelivery delivery = new WebhookDelivery(
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
-                                rs.getString(EventNotificationDBColumns.EVENT_ID),
-                                rs.getString(EventNotificationDBColumns.STATUS),
-                                rs.getInt(EventNotificationDBColumns.ATTEMPT_COUNT),
-                                rs.getTimestamp(EventNotificationDBColumns.NEXT_RETRY_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.DELIVERED_AT));
-                        list.add(new WebhookDeliveryDispatchContext(
-                                delivery,
-                                rs.getString(EventNotificationDBColumns.ORG_ID),
-                                rs.getString(EventNotificationDBColumns.GROUP_ID),
-                                rs.getString(EventNotificationDBColumns.CALLBACK_URL),
-                                rs.getString(EventNotificationDBColumns.SHARED_SECRET),
-                                rs.getString(EventNotificationDBColumns.PAYLOAD),
-                                rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
-                                rs.getString(EventNotificationDBColumns.TOPIC_NAME)));
-                    }
+    private List<WebhookDeliveryDispatchContext> loadDispatchContexts(Connection conn, String sql, int limit) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        List<WebhookDeliveryDispatchContext> list = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    WebhookDelivery delivery = new WebhookDelivery(
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
+                            rs.getString(EventNotificationDBColumns.EVENT_ID),
+                            rs.getString(EventNotificationDBColumns.STATUS),
+                            rs.getInt(EventNotificationDBColumns.ATTEMPT_COUNT),
+                            rs.getTimestamp(EventNotificationDBColumns.NEXT_RETRY_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.DELIVERED_AT));
+                    list.add(new WebhookDeliveryDispatchContext(
+                            delivery,
+                            rs.getString(EventNotificationDBColumns.ORG_ID),
+                            rs.getString(EventNotificationDBColumns.GROUP_ID),
+                            rs.getString(EventNotificationDBColumns.CALLBACK_URL),
+                            rs.getString(EventNotificationDBColumns.SHARED_SECRET),
+                            rs.getString(EventNotificationDBColumns.PAYLOAD),
+                            rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
+                            rs.getString(EventNotificationDBColumns.TOPIC_NAME)));
                 }
-                return list;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        EventNotificationCommonConstants.ERROR_GETTING_PENDING_WEBHOOK_DELIVERIES, e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return list;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    EventNotificationCommonConstants.ERROR_GETTING_PENDING_WEBHOOK_DELIVERIES, e);
         }
     }
 
-    private List<WebhookDeliveryDispatchContext> loadDispatchContextsWithCutoff(String sql, int limit, Timestamp cutoff) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            List<WebhookDeliveryDispatchContext> list = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setTimestamp(1, cutoff != null ? cutoff : new Timestamp(System.currentTimeMillis()));
-                ps.setInt(2, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        WebhookDelivery delivery = new WebhookDelivery(
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
-                                rs.getString(EventNotificationDBColumns.EVENT_ID),
-                                rs.getString(EventNotificationDBColumns.STATUS),
-                                rs.getInt(EventNotificationDBColumns.ATTEMPT_COUNT),
-                                rs.getTimestamp(EventNotificationDBColumns.NEXT_RETRY_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.DELIVERED_AT));
-                        list.add(new WebhookDeliveryDispatchContext(
-                                delivery,
-                                rs.getString(EventNotificationDBColumns.ORG_ID),
-                                rs.getString(EventNotificationDBColumns.GROUP_ID),
-                                rs.getString(EventNotificationDBColumns.CALLBACK_URL),
-                                rs.getString(EventNotificationDBColumns.SHARED_SECRET),
-                                rs.getString(EventNotificationDBColumns.PAYLOAD),
-                                rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
-                                rs.getString(EventNotificationDBColumns.TOPIC_NAME)));
-                    }
+    private List<WebhookDeliveryDispatchContext> loadDispatchContextsWithCutoff(Connection conn, String sql, int limit, Timestamp cutoff) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        List<WebhookDeliveryDispatchContext> list = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, cutoff != null ? cutoff : new Timestamp(System.currentTimeMillis()));
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    WebhookDelivery delivery = new WebhookDelivery(
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
+                            rs.getString(EventNotificationDBColumns.EVENT_ID),
+                            rs.getString(EventNotificationDBColumns.STATUS),
+                            rs.getInt(EventNotificationDBColumns.ATTEMPT_COUNT),
+                            rs.getTimestamp(EventNotificationDBColumns.NEXT_RETRY_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.DELIVERED_AT));
+                    list.add(new WebhookDeliveryDispatchContext(
+                            delivery,
+                            rs.getString(EventNotificationDBColumns.ORG_ID),
+                            rs.getString(EventNotificationDBColumns.GROUP_ID),
+                            rs.getString(EventNotificationDBColumns.CALLBACK_URL),
+                            rs.getString(EventNotificationDBColumns.SHARED_SECRET),
+                            rs.getString(EventNotificationDBColumns.PAYLOAD),
+                            rs.getTimestamp(EventNotificationDBColumns.UPDATED_AT),
+                            rs.getString(EventNotificationDBColumns.TOPIC_NAME)));
                 }
-                return list;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        EventNotificationCommonConstants.ERROR_GETTING_PENDING_WEBHOOK_DELIVERIES, e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return list;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    EventNotificationCommonConstants.ERROR_GETTING_PENDING_WEBHOOK_DELIVERIES, e);
         }
     }
 
     @Override
-    public boolean updateWebhookDeliveryStatus(WebhookDelivery delivery) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = updateWebhookDeliveryStatus(conn, delivery);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
     public boolean updateWebhookDeliveryStatus(Connection conn, WebhookDelivery delivery) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getUpdateWebhookDeliveryStatusQuery())) {
             ps.setString(1, delivery.getStatus());
             ps.setInt(2, delivery.getAttemptCount());
@@ -252,75 +231,46 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean recordSuccessfulAttempt(WebhookDeliveryAudit audit, WebhookDelivery delivery) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean updated = updateWebhookDeliveryStatus(conn, delivery);
-            if (updated) {
-                addWebhookDeliveryAudit(conn, audit);
-            }
-            DatabaseUtils.commitTransaction(conn);
-            return updated;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+    public boolean recordSuccessfulAttempt(Connection conn, WebhookDeliveryAudit audit, WebhookDelivery delivery) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
         }
+        boolean updated = updateWebhookDeliveryStatus(conn, delivery);
+        if (updated) {
+            addWebhookDeliveryAudit(conn, audit);
+        }
+        return updated;
     }
 
     @Override
-    public boolean recordRetryableFailure(WebhookDeliveryAudit audit, String deliveryId, int attemptCount, Timestamp nextRetryAt) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean released = releaseWebhookDelivery(conn, deliveryId, attemptCount, nextRetryAt);
-            if (released) {
-                addWebhookDeliveryAudit(conn, audit);
-            }
-            DatabaseUtils.commitTransaction(conn);
-            return released;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+    public boolean recordRetryableFailure(Connection conn, WebhookDeliveryAudit audit, String deliveryId, int attemptCount, Timestamp nextRetryAt) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
         }
+        boolean released = releaseWebhookDelivery(conn, deliveryId, attemptCount, nextRetryAt);
+        if (released) {
+            addWebhookDeliveryAudit(conn, audit);
+        }
+        return released;
     }
 
     @Override
-    public boolean recordPermanentFailure(WebhookDeliveryAudit audit, WebhookDelivery delivery) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean updated = updateWebhookDeliveryStatus(conn, delivery);
-            if (updated) {
-                addWebhookDeliveryAudit(conn, audit);
-            }
-            DatabaseUtils.commitTransaction(conn);
-            return updated;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+    public boolean recordPermanentFailure(Connection conn, WebhookDeliveryAudit audit, WebhookDelivery delivery) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
         }
+        boolean updated = updateWebhookDeliveryStatus(conn, delivery);
+        if (updated) {
+            addWebhookDeliveryAudit(conn, audit);
+        }
+        return updated;
     }
 
     @Override
-    public boolean addWebhookDeliveryAudit(WebhookDeliveryAudit audit) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = addWebhookDeliveryAudit(conn, audit);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
     public boolean addWebhookDeliveryAudit(Connection conn, WebhookDeliveryAudit audit) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getAddWebhookDeliveryAuditQuery())) {
             ps.setString(1, audit.getAuditId());
             ps.setString(2, audit.getEventId());
@@ -339,51 +289,35 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public List<WebhookDeliveryAudit> getWebhookDeliveryAudits(String deliveryId, String orgId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            List<WebhookDeliveryAudit> list = new ArrayList<>();
-            try (PreparedStatement ps = conn
-                    .prepareStatement(getQueries(conn).getGetWebhookDeliveryAuditsByDeliveryIdQuery())) {
-                ps.setString(1, deliveryId);
-                ps.setString(2, orgId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        list.add(new WebhookDeliveryAudit(
-                                rs.getString(EventNotificationDBColumns.AUDIT_ID),
-                                rs.getString(EventNotificationDBColumns.EVENT_ID),
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getString(EventNotificationDBColumns.ORG_ID),
-                                rs.getString(EventNotificationDBColumns.RESPONSE_CODE),
-                                rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.ATTEMPT_AT)));
-                    }
+    public List<WebhookDeliveryAudit> getWebhookDeliveryAudits(Connection conn, String deliveryId, String orgId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        List<WebhookDeliveryAudit> list = new ArrayList<>();
+        try (PreparedStatement ps = conn
+                .prepareStatement(getQueries(conn).getGetWebhookDeliveryAuditsByDeliveryIdQuery())) {
+            ps.setString(1, deliveryId);
+            ps.setString(2, orgId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    list.add(new WebhookDeliveryAudit(
+                            rs.getString(EventNotificationDBColumns.AUDIT_ID),
+                            rs.getString(EventNotificationDBColumns.EVENT_ID),
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getString(EventNotificationDBColumns.ORG_ID),
+                            rs.getString(EventNotificationDBColumns.RESPONSE_CODE),
+                            rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.ATTEMPT_AT)));
                 }
-                return list;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_WEBHOOK_DELIVERY_AUDITS, deliveryId),
-                        e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return list;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_WEBHOOK_DELIVERY_AUDITS, deliveryId),
+                    e);
         }
     }
 
-    @Override
-    public boolean addPollDelivery(PollDelivery delivery) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = addPollDelivery(conn, delivery);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
 
     @Override
     public boolean addPollDelivery(Connection conn, PollDelivery delivery) {
@@ -406,94 +340,79 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public Optional<PollDelivery> getPollDeliveryById(String deliveryId, String orgId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetPollDeliveryByIdAndOrgQuery())) {
-                ps.setString(1, deliveryId);
-                ps.setString(2, orgId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return Optional.of(new PollDelivery(
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
-                                rs.getString(EventNotificationDBColumns.EVENT_ID),
-                                rs.getString(EventNotificationDBColumns.STATUS),
-                                rs.getString(EventNotificationDBColumns.ERROR_CODE),
-                                rs.getString(EventNotificationDBColumns.ERROR_DETAIL),
-                                rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.COMPLETED_AT)));
-                    }
+    public Optional<PollDelivery> getPollDeliveryById(Connection conn, String deliveryId, String orgId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetPollDeliveryByIdAndOrgQuery())) {
+            ps.setString(1, deliveryId);
+            ps.setString(2, orgId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    PollDelivery delivery = new PollDelivery(
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
+                            rs.getString(EventNotificationDBColumns.EVENT_ID),
+                            rs.getString(EventNotificationDBColumns.STATUS),
+                            rs.getString(EventNotificationDBColumns.ERROR_CODE),
+                            rs.getString(EventNotificationDBColumns.ERROR_DETAIL),
+                            rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.COMPLETED_AT));
+                    return Optional.of(delivery);
                 }
-                return Optional.empty();
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_POLL_DELIVERY, deliveryId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_POLL_DELIVERY, deliveryId), e);
         }
     }
 
     @Override
-    public List<PollDelivery> getPendingPollDeliveries(String orgId, String groupId, String subscriptionId,
+    public List<PollDelivery> getPendingPollDeliveries(Connection conn, String orgId, String groupId, String subscriptionId,
             int limit) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         if (orgId == null || orgId.trim().isEmpty() || groupId == null || groupId.trim().isEmpty()
                 || subscriptionId == null || subscriptionId.trim().isEmpty()) {
             throw new IllegalArgumentException(
                     "Organization ID, Group ID, and Subscription ID are required for polling.");
         }
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            List<PollDelivery> candidates = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement(
-                    getQueries(conn).getGetPendingPollDeliveriesBySubscriptionQuery())) {
-                ps.setString(1, orgId.trim());
-                ps.setString(2, groupId.trim());
-                ps.setString(3, subscriptionId.trim());
-                ps.setInt(4, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        candidates.add(new PollDelivery(
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
-                                rs.getString(EventNotificationDBColumns.EVENT_ID),
-                                rs.getString(EventNotificationDBColumns.STATUS),
-                                rs.getString(EventNotificationDBColumns.ERROR_CODE),
-                                rs.getString(EventNotificationDBColumns.ERROR_DETAIL),
-                                rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
-                                rs.getTimestamp(EventNotificationDBColumns.COMPLETED_AT)));
-                    }
+        List<PollDelivery> candidates = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                getQueries(conn).getGetPendingPollDeliveriesBySubscriptionQuery())) {
+            ps.setString(1, orgId.trim());
+            ps.setString(2, groupId.trim());
+            ps.setString(3, subscriptionId.trim());
+            ps.setInt(4, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    candidates.add(new PollDelivery(
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getString(EventNotificationDBColumns.SUBSCRIPTION_ID),
+                            rs.getString(EventNotificationDBColumns.EVENT_ID),
+                            rs.getString(EventNotificationDBColumns.STATUS),
+                            rs.getString(EventNotificationDBColumns.ERROR_CODE),
+                            rs.getString(EventNotificationDBColumns.ERROR_DETAIL),
+                            rs.getTimestamp(EventNotificationDBColumns.CREATED_AT),
+                            rs.getTimestamp(EventNotificationDBColumns.COMPLETED_AT)));
                 }
-                return candidates;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_PENDING_POLL_DELIVERIES,
-                                subscriptionId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
-    public void updatePollDeliveryStatusesByDeliveryIds(String orgId, String groupId, String subscriptionId,
-            List<String> ackDeliveryIds, Map<String, PollDeliveryError> errors) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            updatePollDeliveryStatusesByDeliveryIds(conn, orgId, groupId, subscriptionId, ackDeliveryIds, errors);
-            DatabaseUtils.commitTransaction(conn);
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return candidates;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_PENDING_POLL_DELIVERIES,
+                            subscriptionId), e);
         }
     }
 
     @Override
     public void updatePollDeliveryStatusesByDeliveryIds(Connection conn, String orgId, String groupId,
             String subscriptionId, List<String> ackDeliveryIds, Map<String, PollDeliveryError> errors) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         if (orgId == null || orgId.trim().isEmpty() || groupId == null || groupId.trim().isEmpty()
                 || subscriptionId == null || subscriptionId.trim().isEmpty()) {
             throw new IllegalArgumentException(
@@ -559,22 +478,10 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean claimWebhookDelivery(String deliveryId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = claimWebhookDelivery(conn, deliveryId);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean claimWebhookDelivery(Connection conn, String deliveryId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getClaimWebhookDeliveryQuery())) {
             ps.setString(1, deliveryId);
             return ps.executeUpdate() > 0;
@@ -585,22 +492,10 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean claimStuckWebhookDelivery(String deliveryId, Timestamp updatedBefore) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = claimStuckWebhookDelivery(conn, deliveryId, updatedBefore);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean claimStuckWebhookDelivery(Connection conn, String deliveryId, Timestamp updatedBefore) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getClaimStuckWebhookDeliveryQuery())) {
             ps.setString(1, deliveryId);
             ps.setTimestamp(2, updatedBefore != null ? updatedBefore : new Timestamp(System.currentTimeMillis()));
@@ -612,22 +507,10 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean releaseWebhookDelivery(String deliveryId, int attemptCount, Timestamp nextRetryAt) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = releaseWebhookDelivery(conn, deliveryId, attemptCount, nextRetryAt);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean releaseWebhookDelivery(Connection conn, String deliveryId, int attemptCount, Timestamp nextRetryAt) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         if (deliveryId == null || deliveryId.trim().isEmpty()) {
             return false;
         }
@@ -643,22 +526,10 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean claimPollDelivery(String deliveryId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = claimPollDelivery(conn, deliveryId);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean claimPollDelivery(Connection conn, String deliveryId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getClaimPollDeliveryQuery())) {
             ps.setString(1, deliveryId);
             return ps.executeUpdate() > 0;
@@ -669,22 +540,10 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean updatePollDeliveryStatus(String deliveryId, String status) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = updatePollDeliveryStatus(conn, deliveryId, status);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean updatePollDeliveryStatus(Connection conn, String deliveryId, String status) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getUpdatePollDeliveryStatusQuery())) {
             ps.setString(1, status);
             ps.setTimestamp(2, new java.sql.Timestamp(System.currentTimeMillis()));
@@ -697,25 +556,10 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public boolean updatePollDeliveryStatus(String deliveryId, String expectedStatus, String newStatus) {
-        if (expectedStatus == null || expectedStatus.trim().isEmpty()) {
-            return updatePollDeliveryStatus(deliveryId, newStatus);
-        }
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = updatePollDeliveryStatus(conn, deliveryId, expectedStatus, newStatus);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
     public boolean updatePollDeliveryStatus(Connection conn, String deliveryId, String expectedStatus, String newStatus) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getUpdatePollDeliveryStatusGuardedQuery())) {
             ps.setString(1, newStatus);
             ps.setTimestamp(2, new java.sql.Timestamp(System.currentTimeMillis()));
@@ -729,84 +573,83 @@ public class DeliveryDAOImpl implements DeliveryDAO {
     }
 
     @Override
-    public List<SubscriptionDeliverySummary> listSubscriptionDeliveries(String orgId, String subscriptionId, int limit,
+    public List<SubscriptionDeliverySummary> listSubscriptionDeliveries(Connection conn, String orgId, String subscriptionId, int limit,
             int offset, int[] totalOut) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         List<SubscriptionDeliverySummary> list = new ArrayList<>();
-
-        Connection conn = DatabaseUtils.getDBConnection();
         try {
-            try {
-                EventNotificationCommonDBQueries queries = getQueries(conn);
-                String baseSql = queries.getGetSubscriptionDeliveriesUnionBaseQuery();
-                String countSql = "SELECT COUNT(*) FROM (" + baseSql + ") AS u";
-                String pageSql = baseSql + queries.getPaginationClause("DELIVERY_CREATED_AT DESC");
-                try (PreparedStatement countPs = conn.prepareStatement(countSql)) {
-                    countPs.setString(1, subscriptionId);
-                    countPs.setString(2, orgId);
-                    countPs.setString(3, subscriptionId);
-                    countPs.setString(4, orgId);
-                    try (ResultSet rs = countPs.executeQuery()) {
-                        if (rs.next()) {
-                            totalOut[0] = rs.getInt(1);
-                        }
-                    }
-                }
-
-                try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
-                    ps.setString(1, subscriptionId);
-                    ps.setString(2, orgId);
-                    ps.setString(3, subscriptionId);
-                    ps.setString(4, orgId);
-                    ps.setInt(5, limit);
-                    ps.setInt(6, offset);
-
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            list.add(mapSummary(rs));
-                        }
-                    }
-                }
-                return list;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_LISTING_DELIVERIES_FOR_SUBSCRIPTION,
-                                subscriptionId),
-                        e);
-            }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
-    public Optional<SubscriptionDeliverySummary> getSubscriptionDeliveryById(String orgId, String subscriptionId, String deliveryId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetSubscriptionDeliveryByIdQuery())) {
-                ps.setString(1, subscriptionId);
-                ps.setString(2, deliveryId);
-                ps.setString(3, orgId);
-                ps.setString(4, subscriptionId);
-                ps.setString(5, deliveryId);
-                ps.setString(6, orgId);
-                try (ResultSet rs = ps.executeQuery()) {
+            EventNotificationCommonDBQueries queries = getQueries(conn);
+            String baseSql = queries.getGetSubscriptionDeliveriesUnionBaseQuery();
+            String countSql = "SELECT COUNT(*) FROM (" + baseSql + ") AS u";
+            String pageSql = baseSql + queries.getPaginationClause("DELIVERY_CREATED_AT DESC");
+            try (PreparedStatement countPs = conn.prepareStatement(countSql)) {
+                countPs.setString(1, subscriptionId);
+                countPs.setString(2, orgId);
+                countPs.setString(3, subscriptionId);
+                countPs.setString(4, orgId);
+                try (ResultSet rs = countPs.executeQuery()) {
                     if (rs.next()) {
-                        return Optional.of(mapSummary(rs));
+                        totalOut[0] = rs.getInt(1);
                     }
                 }
-                return Optional.empty();
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_SUBSCRIPTION_DELIVERY, deliveryId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+
+            try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
+                ps.setString(1, subscriptionId);
+                ps.setString(2, orgId);
+                ps.setString(3, subscriptionId);
+                ps.setString(4, orgId);
+                ps.setInt(5, limit);
+                ps.setInt(6, offset);
+
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(mapSummary(rs));
+                    }
+                }
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_LISTING_DELIVERIES_FOR_SUBSCRIPTION,
+                            subscriptionId),
+                    e);
         }
     }
 
     @Override
-    public List<SubscriptionDeliverySummary> listOrgDeliveries(String orgId, String statusFilter,
+    public Optional<SubscriptionDeliverySummary> getSubscriptionDeliveryById(Connection conn, String orgId, String subscriptionId, String deliveryId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetSubscriptionDeliveryByIdQuery())) {
+            ps.setString(1, subscriptionId);
+            ps.setString(2, deliveryId);
+            ps.setString(3, orgId);
+            ps.setString(4, subscriptionId);
+            ps.setString(5, deliveryId);
+            ps.setString(6, orgId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    SubscriptionDeliverySummary summary = mapSummary(rs);
+                    return Optional.of(summary);
+                }
+            }
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_SUBSCRIPTION_DELIVERY, deliveryId), e);
+        }
+    }
+
+    @Override
+    public List<SubscriptionDeliverySummary> listOrgDeliveries(Connection conn, String orgId, String statusFilter,
             String subscriptionIdFilter, String groupIdFilter, String purposesFilter, String search, int limit, int offset, int[] totalOut) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
         List<SubscriptionDeliverySummary> list = new ArrayList<>();
         StringBuilder outerWhere = new StringBuilder();
         List<Object> outerParams = new ArrayList<>();
@@ -863,17 +706,98 @@ public class DeliveryDAOImpl implements DeliveryDAO {
             outerParams.add(term);
         }
 
-        Connection conn = DatabaseUtils.getDBConnection();
         try {
-            try {
-                EventNotificationCommonDBQueries queries = getQueries(conn);
-                StringBuilder unionSql = new StringBuilder(queries.getGetOrgDeliveriesUnionBaseQuery());
-                List<Object> unionParams = new ArrayList<>(Arrays.asList(orgId, orgId));
+            EventNotificationCommonDBQueries queries = getQueries(conn);
+            StringBuilder unionSql = new StringBuilder(queries.getGetOrgDeliveriesUnionBaseQuery());
+            List<Object> unionParams = new ArrayList<>(Arrays.asList(orgId, orgId));
 
-                String wrappedSql = "SELECT * FROM (" + unionSql + ") AS u" + outerWhere;
-                String countSql = "SELECT COUNT(*) FROM (" + wrappedSql + ") AS c";
-                String pageSql = wrappedSql + queries.getPaginationClause("DELIVERY_CREATED_AT DESC");
+            String wrappedSql = "SELECT * FROM (" + unionSql + ") AS u" + outerWhere;
+            String countSql = "SELECT COUNT(*) FROM (" + wrappedSql + ") AS c";
+            String pageSql = wrappedSql + queries.getPaginationClause("DELIVERY_CREATED_AT DESC");
 
+            try (PreparedStatement countPs = conn.prepareStatement(countSql)) {
+                int paramIdx = 1;
+                for (Object p : unionParams) {
+                    countPs.setObject(paramIdx++, p);
+                }
+                for (Object p : outerParams) {
+                    countPs.setObject(paramIdx++, p);
+                }
+                try (ResultSet rs = countPs.executeQuery()) {
+                    if (rs.next()) {
+                        totalOut[0] = rs.getInt(1);
+                    }
+                }
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
+                int paramIdx = 1;
+                for (Object p : unionParams) {
+                    ps.setObject(paramIdx++, p);
+                }
+                for (Object p : outerParams) {
+                    ps.setObject(paramIdx++, p);
+                }
+                ps.setInt(paramIdx++, limit);
+                ps.setInt(paramIdx++, offset);
+
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(mapSummary(rs));
+                    }
+                }
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_LISTING_ORG_DELIVERIES, orgId), e);
+        }
+    }
+
+    @Override
+    public Optional<SubscriptionDeliverySummary> getOrgDeliveryById(Connection conn, String orgId, String deliveryId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetOrgDeliveryByIdQuery())) {
+            ps.setString(1, orgId);
+            ps.setString(2, orgId);
+            ps.setString(3, deliveryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    SubscriptionDeliverySummary summary = mapSummary(rs);
+                    return Optional.of(summary);
+                }
+            }
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_ORG_DELIVERY, deliveryId), e);
+        }
+    }
+
+    @Override
+    public List<SubscriptionDeliverySummary> listEventDeliveries(Connection conn, String orgId, String eventId, int limit, int offset, int[] totalOut) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        if (orgId == null || orgId.trim().isEmpty() || eventId == null || eventId.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<SubscriptionDeliverySummary> list = new ArrayList<>();
+        StringBuilder outerWhere = new StringBuilder(" WHERE EVENT_ID = ?");
+        List<Object> outerParams = new ArrayList<>(Collections.singletonList(eventId.trim()));
+
+        try {
+            EventNotificationCommonDBQueries queries = getQueries(conn);
+            StringBuilder unionSql = new StringBuilder(queries.getGetOrgDeliveriesUnionBaseQuery());
+            List<Object> unionParams = new ArrayList<>(Arrays.asList(orgId, orgId));
+
+            String wrappedSql = "SELECT * FROM (" + unionSql + ") AS u" + outerWhere;
+            String countSql = "SELECT COUNT(*) FROM (" + wrappedSql + ") AS c";
+            String pageSql = wrappedSql + queries.getPaginationClause("DELIVERY_CREATED_AT DESC");
+
+            if (totalOut != null && totalOut.length > 0) {
                 try (PreparedStatement countPs = conn.prepareStatement(countSql)) {
                     int paramIdx = 1;
                     for (Object p : unionParams) {
@@ -888,118 +812,29 @@ public class DeliveryDAOImpl implements DeliveryDAO {
                         }
                     }
                 }
-
-                try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
-                    int paramIdx = 1;
-                    for (Object p : unionParams) {
-                        ps.setObject(paramIdx++, p);
-                    }
-                    for (Object p : outerParams) {
-                        ps.setObject(paramIdx++, p);
-                    }
-                    ps.setInt(paramIdx++, limit);
-                    ps.setInt(paramIdx++, offset);
-
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            list.add(mapSummary(rs));
-                        }
-                    }
-                }
-                return list;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_LISTING_ORG_DELIVERIES, orgId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
 
-    @Override
-    public Optional<SubscriptionDeliverySummary> getOrgDeliveryById(String orgId, String deliveryId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetOrgDeliveryByIdQuery())) {
-                ps.setString(1, orgId);
-                ps.setString(2, orgId);
-                ps.setString(3, deliveryId);
+            try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
+                int paramIdx = 1;
+                for (Object p : unionParams) {
+                    ps.setObject(paramIdx++, p);
+                }
+                for (Object p : outerParams) {
+                    ps.setObject(paramIdx++, p);
+                }
+                ps.setInt(paramIdx++, limit);
+                ps.setInt(paramIdx++, offset);
+
                 try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return Optional.of(mapSummary(rs));
+                    while (rs.next()) {
+                        list.add(mapSummary(rs));
                     }
                 }
-                return Optional.empty();
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_ORG_DELIVERY, deliveryId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
-    @Override
-    public List<SubscriptionDeliverySummary> listEventDeliveries(String orgId, String eventId, int limit, int offset, int[] totalOut) {
-        if (orgId == null || orgId.trim().isEmpty() || eventId == null || eventId.trim().isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<SubscriptionDeliverySummary> list = new ArrayList<>();
-        StringBuilder outerWhere = new StringBuilder(" WHERE EVENT_ID = ?");
-        List<Object> outerParams = new ArrayList<>(Collections.singletonList(eventId.trim()));
-
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try {
-                EventNotificationCommonDBQueries queries = getQueries(conn);
-                StringBuilder unionSql = new StringBuilder(queries.getGetOrgDeliveriesUnionBaseQuery());
-                List<Object> unionParams = new ArrayList<>(Arrays.asList(orgId, orgId));
-
-                String wrappedSql = "SELECT * FROM (" + unionSql + ") AS u" + outerWhere;
-                String countSql = "SELECT COUNT(*) FROM (" + wrappedSql + ") AS c";
-                String pageSql = wrappedSql + queries.getPaginationClause("DELIVERY_CREATED_AT DESC");
-
-                if (totalOut != null && totalOut.length > 0) {
-                    try (PreparedStatement countPs = conn.prepareStatement(countSql)) {
-                        int paramIdx = 1;
-                        for (Object p : unionParams) {
-                            countPs.setObject(paramIdx++, p);
-                        }
-                        for (Object p : outerParams) {
-                            countPs.setObject(paramIdx++, p);
-                        }
-                        try (ResultSet rs = countPs.executeQuery()) {
-                            if (rs.next()) {
-                                totalOut[0] = rs.getInt(1);
-                            }
-                        }
-                    }
-                }
-
-                try (PreparedStatement ps = conn.prepareStatement(pageSql)) {
-                    int paramIdx = 1;
-                    for (Object p : unionParams) {
-                        ps.setObject(paramIdx++, p);
-                    }
-                    for (Object p : outerParams) {
-                        ps.setObject(paramIdx++, p);
-                    }
-                    ps.setInt(paramIdx++, limit);
-                    ps.setInt(paramIdx++, offset);
-
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            list.add(mapSummary(rs));
-                        }
-                    }
-                }
-                return list;
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_LISTING_ORG_DELIVERIES, orgId), e);
-            }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return list;
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_LISTING_ORG_DELIVERIES, orgId), e);
         }
     }
 

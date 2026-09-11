@@ -1,0 +1,50 @@
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Forward-compatibility watch. PR runs and the release gate test the U2-updated 7.3.0 pack
+# operators actually install, which leaves nothing exercising product-is master - so an
+# upstream breaking change would first surface during the next IS upgrade. This catches it
+# a week at a time instead.
+#
+# A failure here means master has moved in a way that will matter later, not that the
+# accelerator is broken. Forward-looking work, not a release blocker.
+name: '[Weekly] Test against IS built from master'
+
+on:
+  schedule:
+    # Saturday, off-hours in IST and PST so it does not compete with PR E2E for runners.
+    # Same slot as the U2 job, so the two together read as one weekly checkpoint.
+    - cron: '7 2 * * 6'
+  workflow_dispatch:
+
+# A queued duplicate would just re-test the same commit, so the later run wins.
+concurrency:
+  group: weekly-e2e-is-master
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    # No `ref`: a scheduled run checks out the default branch, which is what we want tested.
+    # This never takes the S3 path, so it does not warm the pack cache.
+    uses: ./.github/workflows/e2e.yml
+    with:
+      is_source: master
+    # The master path uses none of these; inherited so a later dispatch with a different
+    # source does not fail confusingly.
+    secrets: inherit

@@ -22,7 +22,6 @@ import org.wso2.dpdp.accelerator.event.notifications.common.constants.EventNotif
 import org.wso2.dpdp.accelerator.event.notifications.common.exception.EventNotificationDataAccessException;
 import org.wso2.dpdp.accelerator.event.notifications.dao.constants.EventNotificationDBColumns;
 import org.wso2.dpdp.accelerator.event.notifications.common.exception.EventNotificationDuplicateResourceException;
-import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.DeliveryAckDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDeliveryAck;
 import org.wso2.dpdp.accelerator.event.notifications.dao.queries.EventNotificationCommonDBQueries;
@@ -41,21 +40,10 @@ public class DeliveryAckDAOImpl implements DeliveryAckDAO {
     }
 
     @Override
-    public boolean addDeliveryAck(WebhookDeliveryAck ack) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            boolean result = addDeliveryAck(conn, ack);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+    public boolean addDeliveryAck(Connection conn, WebhookDeliveryAck ack) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
         }
-    }
-
-    private boolean addDeliveryAck(Connection conn, WebhookDeliveryAck ack) {
         try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getAddWebhookDeliveryAckQuery())) {
             ps.setString(1, ack.getAckId());
             ps.setString(2, ack.getDeliveryId());
@@ -74,29 +62,28 @@ public class DeliveryAckDAOImpl implements DeliveryAckDAO {
     }
 
     @Override
-    public Optional<WebhookDeliveryAck> getDeliveryAckByDeliveryId(String deliveryId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetWebhookDeliveryAckByDeliveryIdQuery())) {
-                ps.setString(1, deliveryId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return Optional.of(new WebhookDeliveryAck(
-                                rs.getString(EventNotificationDBColumns.ACK_ID),
-                                rs.getString(EventNotificationDBColumns.DELIVERY_ID),
-                                rs.getTimestamp(EventNotificationDBColumns.COMPLETED_AT),
-                                rs.getString(EventNotificationDBColumns.COMPLETION_STATUS),
-                                rs.getString(EventNotificationDBColumns.COMPLETION_EVIDENCE)
-                        ));
-                    }
+    public Optional<WebhookDeliveryAck> getDeliveryAckByDeliveryId(Connection conn, String deliveryId) {
+        if (conn == null) {
+            throw new IllegalArgumentException("Connection cannot be null.");
+        }
+        try (PreparedStatement ps = conn.prepareStatement(getQueries(conn).getGetWebhookDeliveryAckByDeliveryIdQuery())) {
+            ps.setString(1, deliveryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    WebhookDeliveryAck ack = new WebhookDeliveryAck(
+                            rs.getString(EventNotificationDBColumns.ACK_ID),
+                            rs.getString(EventNotificationDBColumns.DELIVERY_ID),
+                            rs.getTimestamp(EventNotificationDBColumns.COMPLETED_AT),
+                            rs.getString(EventNotificationDBColumns.COMPLETION_STATUS),
+                            rs.getString(EventNotificationDBColumns.COMPLETION_EVIDENCE)
+                    );
+                    return Optional.of(ack);
                 }
-                return Optional.empty();
-            } catch (SQLException e) {
-                throw new EventNotificationDataAccessException(
-                        String.format(EventNotificationCommonConstants.ERROR_GETTING_DELIVERY_ACK_BY_DELIVERY_ID, deliveryId), e);
             }
-        } finally {
-            DatabaseUtils.closeConnection(conn);
+            return Optional.empty();
+        } catch (SQLException e) {
+            throw new EventNotificationDataAccessException(
+                    String.format(EventNotificationCommonConstants.ERROR_GETTING_DELIVERY_ACK_BY_DELIVERY_ID, deliveryId), e);
         }
     }
 }

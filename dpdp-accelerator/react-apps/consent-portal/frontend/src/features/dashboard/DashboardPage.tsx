@@ -261,7 +261,7 @@ function DashboardPage(): React.JSX.Element {
             {data.pendingCount > 0 ? (
               <Button
                 component={RouterLink}
-                to="/consents?state=PENDING"
+                to="/consents?view=pending&state=PENDING"
                 size="small"
                 endIcon={<ArrowRight size={15} />}
                 sx={{ mt: 1 }}

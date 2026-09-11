@@ -22,12 +22,10 @@
 #     executing PR code under it is the classic "pwn request" exposure - the review
 #     is what makes that acceptable. pr-e2e-gate.yml strips the label on every
 #     subsequent push, so an approval cannot carry over to code nobody looked at.
-#     (Subscription secrets are deliberately *not* passed on this path - see the
-#     secrets block below.)
+#     The S3 and U2 secrets are passed on this path, on that same review basis.
 #   - workflow_dispatch: manual and already authenticated, so no label needed.
-#     It is also the only way to pick `is_source: release` (a GA pack plus U2
-#     updates); labelled PR runs always build product-is from master, which
-#     needs no subscription secrets at all.
+#     It is also the only way to pick `is_source: master`, which builds product-is
+#     from source instead of testing against the 7.3.0 pack the default uses.
 #
 # E2E checks out refs/pull/N/merge - the PR merged onto the current base - not
 # the branch tip, so it tests what merging would actually produce rather than
@@ -44,8 +42,8 @@ on:
       is_source:
         description: Where to get the Identity Server pack from
         type: choice
-        options: [release, master]
-        default: release
+        options: [s3, master]
+        default: s3
 
 # A genuine E2E run shares pr-e2e-gate.yml's group, so a new push cancels a run
 # against the commit it supersedes.
@@ -76,17 +74,9 @@ jobs:
     with:
       ref: ${{ github.event_name == 'pull_request_target' && format('refs/pull/{0}/merge', github.event.pull_request.number) || '' }}
       expected_head_sha: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
-      is_source: ${{ github.event_name == 'workflow_dispatch' && inputs.is_source || 'master' }}
+      is_source: ${{ github.event_name == 'workflow_dispatch' && inputs.is_source || 's3' }}
       allow_unsafe_pr_checkout: ${{ github.event_name == 'pull_request_target' }}
-    # Not `inherit`. A labelled PR run always builds product-is from master, and
-    # every consumer of these three in e2e.yml is gated on is_source == 'release',
-    # so a PR run has no use for them - and PR runs are exactly the ones executing
-    # code that may have come from a fork. They are passed only on a manual
-    # dispatch, which is the only way to select the release+U2 path.
-    secrets:
-      SOLUTIONS_BOT_EMAIL: ${{ github.event_name == 'workflow_dispatch' && secrets.SOLUTIONS_BOT_EMAIL || '' }}
-      SOLUTIONS_BOT_U2_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && secrets.SOLUTIONS_BOT_U2_PASSWORD || '' }}
-      WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE: ${{ github.event_name == 'workflow_dispatch' && secrets.WSO2_UPDATE_TOOL_SETUP_DECRYPTION_PASSPHRASE || '' }}
+    secrets: inherit
 
   # Flips the "E2E (label-gated)" status pr-e2e-gate.yml set to pending, on the head SHA the
   # label event carried.

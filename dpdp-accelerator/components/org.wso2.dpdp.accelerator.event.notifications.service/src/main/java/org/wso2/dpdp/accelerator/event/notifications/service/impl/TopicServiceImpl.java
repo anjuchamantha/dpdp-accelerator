@@ -18,6 +18,7 @@
 
 package org.wso2.dpdp.accelerator.event.notifications.service.impl;
 
+import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.PaginatedDAOResult;
 import org.wso2.dpdp.accelerator.event.notifications.dao.TopicDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Topic;
@@ -58,37 +59,39 @@ public class TopicServiceImpl implements TopicService {
                     400);
         }
 
-        Optional<Topic> existing = topicDAO.getTopicByOrgAndName(orgId.trim(), name.trim());
-        if (existing.isPresent()) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
-                    EventNotificationServiceConstants.ERROR_TITLE_TOPIC_ALREADY_EXISTS,
-                    EventNotificationServiceConstants.TOPIC_ALREADY_EXISTS_ERROR_MSG,
-                    409);
-        }
-
         String topicId = UUID.randomUUID().toString();
         Topic topic = new Topic(topicId, orgId.trim(), name.trim(), description != null ? description.trim() : null,
                 TopicStatus.ACTIVE.getValue(), Initiator.USER.getValue());
-        try {
-            boolean created = topicDAO.addTopic(topic);
-            if (!created) {
-                throw new EventNotificationException(
-                        EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
-                        EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
-                        EventNotificationServiceConstants.FAILED_TO_CREATE_TOPIC_ERROR_MSG,
-                        500);
-            }
-        } catch (EventNotificationDuplicateResourceException e) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
-                    EventNotificationServiceConstants.ERROR_TITLE_TOPIC_ALREADY_EXISTS,
-                    EventNotificationServiceConstants.TOPIC_ALREADY_EXISTS_ERROR_MSG,
-                    409);
-        }
 
-        return new TopicDTO(topicId, topic.getName(), topic.getDescription(), TopicStatus.ACTIVE.getValue(),
-                Initiator.USER.getValue());
+        return DatabaseUtils.executeInTransaction(conn -> {
+            try {
+                Optional<Topic> existing = topicDAO.getTopicByOrgAndName(conn, orgId.trim(), name.trim());
+                if (existing.isPresent()) {
+                    throw new EventNotificationException(
+                            EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
+                            EventNotificationServiceConstants.ERROR_TITLE_TOPIC_ALREADY_EXISTS,
+                            EventNotificationServiceConstants.TOPIC_ALREADY_EXISTS_ERROR_MSG,
+                            409);
+                }
+
+                boolean created = topicDAO.addTopic(conn, topic);
+                if (!created) {
+                    throw new EventNotificationException(
+                            EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
+                            EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
+                            EventNotificationServiceConstants.FAILED_TO_CREATE_TOPIC_ERROR_MSG,
+                            500);
+                }
+            } catch (EventNotificationDuplicateResourceException e) {
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
+                        EventNotificationServiceConstants.ERROR_TITLE_TOPIC_ALREADY_EXISTS,
+                        EventNotificationServiceConstants.TOPIC_ALREADY_EXISTS_ERROR_MSG,
+                        409);
+            }
+            return new TopicDTO(topicId, topic.getName(), topic.getDescription(), TopicStatus.ACTIVE.getValue(),
+                    Initiator.USER.getValue());
+        });
     }
 
     @Override
@@ -97,38 +100,46 @@ public class TopicServiceImpl implements TopicService {
         String normalizedOrgId = orgId.trim();
         String normalizedName = name.trim();
 
-        Optional<Topic> existing = topicDAO.getTopicByOrgAndName(normalizedOrgId, normalizedName);
-        if (existing.isPresent()) {
-            return mapExistingSystemTopic(existing.get(), normalizedName);
-        }
-
-        String topicId = UUID.randomUUID().toString();
-        Topic topic = new Topic(topicId, normalizedOrgId, normalizedName,
-                description != null ? description.trim() : null,
-                TopicStatus.ACTIVE.getValue(), Initiator.SYSTEM.getValue());
         try {
-            boolean created = topicDAO.addTopic(topic);
-            if (!created) {
-                throw new EventNotificationException(
-                        EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
-                        EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
-                        EventNotificationServiceConstants.FAILED_TO_CREATE_TOPIC_ERROR_MSG,
-                        500);
-            }
+            return DatabaseUtils.executeInTransaction(conn -> {
+                Optional<Topic> existing = topicDAO.getTopicByOrgAndName(conn, normalizedOrgId, normalizedName);
+                if (existing.isPresent()) {
+                    return mapExistingSystemTopic(existing.get(), normalizedName);
+                }
+
+                String topicId = UUID.randomUUID().toString();
+                Topic topic = new Topic(topicId, normalizedOrgId, normalizedName,
+                        description != null ? description.trim() : null,
+                        TopicStatus.ACTIVE.getValue(), Initiator.SYSTEM.getValue());
+                boolean created = topicDAO.addTopic(conn, topic);
+                if (!created) {
+                    throw new EventNotificationException(
+                            EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
+                            EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
+                            EventNotificationServiceConstants.FAILED_TO_CREATE_TOPIC_ERROR_MSG,
+                            500);
+                }
+                return new TopicDTO(topicId, topic.getName(), topic.getDescription(), TopicStatus.ACTIVE.getValue(),
+                        Initiator.SYSTEM.getValue());
+            });
         } catch (EventNotificationDuplicateResourceException e) {
-            Optional<Topic> concurrentlyCreated = topicDAO.getTopicByOrgAndName(normalizedOrgId, normalizedName);
+            return recoverConcurrentlyCreatedSystemTopic(normalizedOrgId, normalizedName);
+        }
+    }
+
+    private TopicDTO recoverConcurrentlyCreatedSystemTopic(String orgId, String topicName) {
+
+        return DatabaseUtils.executeInTransaction(conn -> {
+            Optional<Topic> concurrentlyCreated = topicDAO.getTopicByOrgAndName(conn, orgId, topicName);
             if (concurrentlyCreated.isPresent()) {
-                return mapExistingSystemTopic(concurrentlyCreated.get(), normalizedName);
+                return mapExistingSystemTopic(concurrentlyCreated.get(), topicName);
             }
             throw new EventNotificationException(
                     EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
                     EventNotificationServiceConstants.ERROR_TITLE_TOPIC_ALREADY_EXISTS,
                     EventNotificationServiceConstants.TOPIC_ALREADY_EXISTS_ERROR_MSG,
                     409);
-        }
-
-        return new TopicDTO(topicId, topic.getName(), topic.getDescription(), TopicStatus.ACTIVE.getValue(),
-                Initiator.SYSTEM.getValue());
+        });
     }
 
     private void validateTopicCreationParameters(String orgId, String name) {
@@ -168,14 +179,18 @@ public class TopicServiceImpl implements TopicService {
         int lim = EventNotificationParameterUtils.normalizeLimit(limit);
         int off = EventNotificationParameterUtils.normalizeOffset(offset);
         String normalizedStatus = EventNotificationParameterUtils.normalizeStatusFilter(status);
-        PaginatedDAOResult<Topic> daoResult = topicDAO.listTopics(
-                orgId.trim(), normalizedStatus, search, lim, off, sort);
-        List<TopicDTO> dtoList = new ArrayList<>();
-        for (Topic t : daoResult.getItems()) {
-            dtoList.add(
-                    new TopicDTO(t.getTopicId(), t.getName(), t.getDescription(), t.getStatus(), t.getInitiatedBy()));
-        }
-        return new PaginatedResult<>(dtoList, daoResult.getTotal());
+
+        return DatabaseUtils.executeInTransaction(conn -> {
+            PaginatedDAOResult<Topic> daoResult = topicDAO.listTopics(
+                    conn, orgId.trim(), normalizedStatus, search, lim, off, sort);
+            List<TopicDTO> dtoList = new ArrayList<>();
+            for (Topic t : daoResult.getItems()) {
+                dtoList.add(
+                        new TopicDTO(t.getTopicId(), t.getName(), t.getDescription(), t.getStatus(),
+                                t.getInitiatedBy()));
+            }
+            return new PaginatedResult<>(dtoList, daoResult.getTotal());
+        });
     }
 
     @Override
@@ -195,67 +210,72 @@ public class TopicServiceImpl implements TopicService {
                     400);
         }
 
-        Optional<Topic> topicOpt = topicDAO.getTopicById(topicIdStr.trim(), orgId.trim());
-        if (topicOpt.isEmpty() || !orgId.trim().equalsIgnoreCase(topicOpt.get().getOrgId())) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_TOPIC_NOT_FOUND,
-                    String.format(EventNotificationServiceConstants.TOPIC_NOT_FOUND_ERROR_MSG, topicIdStr.trim()),
-                    404);
-        }
+        return DatabaseUtils.executeInTransaction(conn -> {
+            Optional<Topic> topicOpt = topicDAO.getTopicById(conn, topicIdStr.trim(), orgId.trim());
+            if (!topicOpt.isPresent() || !orgId.trim().equalsIgnoreCase(topicOpt.get().getOrgId())) {
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_TOPIC_NOT_FOUND,
+                        String.format(EventNotificationServiceConstants.TOPIC_NOT_FOUND_ERROR_MSG, topicIdStr.trim()),
+                        404);
+            }
 
-        Topic topic = topicOpt.get();
-        if (Initiator.SYSTEM.getValue().equalsIgnoreCase(topic.getInitiatedBy())) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_INVALID_REQUEST,
-                    EventNotificationServiceConstants.ERROR_TITLE_OPERATION_FORBIDDEN,
-                    String.format(EventNotificationServiceConstants.SYSTEM_TOPIC_DELETE_FORBIDDEN_ERROR_MSG,
-                            topic.getName()),
-                    409);
-        }
+            Topic topic = topicOpt.get();
+            if (Initiator.SYSTEM.getValue().equalsIgnoreCase(topic.getInitiatedBy())) {
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_INVALID_REQUEST,
+                        EventNotificationServiceConstants.ERROR_TITLE_OPERATION_FORBIDDEN,
+                        String.format(EventNotificationServiceConstants.SYSTEM_TOPIC_DELETE_FORBIDDEN_ERROR_MSG,
+                                topic.getName()),
+                        409);
+            }
 
-        if (TopicStatus.DEREGISTERED.getValue().equalsIgnoreCase(topic.getStatus())) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND,
-                    EventNotificationServiceConstants.ERROR_TITLE_TOPIC_NOT_FOUND,
-                    String.format(EventNotificationServiceConstants.TOPIC_ALREADY_DEREGISTERED_ERROR_MSG,
-                            topicIdStr.trim()),
-                    404);
-        }
+            if (TopicStatus.DEREGISTERED.getValue().equalsIgnoreCase(topic.getStatus())) {
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_TOPIC_NOT_FOUND,
+                        EventNotificationServiceConstants.ERROR_TITLE_TOPIC_NOT_FOUND,
+                        String.format(EventNotificationServiceConstants.TOPIC_ALREADY_DEREGISTERED_ERROR_MSG,
+                                topicIdStr.trim()),
+                        404);
+            }
 
-        boolean updated;
-        try {
-            updated = topicDAO.deregisterTopicAtomic(topic.getTopicId(), orgId.trim());
-        } catch (EventNotificationInvalidStateException e) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
-                    EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_EXISTS,
-                    String.format(EventNotificationServiceConstants.TOPIC_HAS_ACTIVE_SUBSCRIPTIONS_ERROR_MSG,
-                            topic.getName()),
-                    409);
-        }
-        if (!updated) {
-            throw new EventNotificationException(
-                    EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
-                    EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
-                    EventNotificationServiceConstants.FAILED_TO_DEREGISTER_TOPIC_ERROR_MSG,
-                    500);
-        }
+            boolean updated;
+            try {
+                updated = topicDAO.deregisterTopicAtomic(conn, topic.getTopicId(), orgId.trim());
+            } catch (EventNotificationInvalidStateException e) {
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_RESOURCE_EXISTS,
+                        EventNotificationServiceConstants.ERROR_TITLE_RESOURCE_EXISTS,
+                        String.format(EventNotificationServiceConstants.TOPIC_HAS_ACTIVE_SUBSCRIPTIONS_ERROR_MSG,
+                                topic.getName()),
+                        409);
+            }
+            if (!updated) {
+                throw new EventNotificationException(
+                        EventNotificationServiceConstants.ERROR_CODE_INTERNAL_ERROR,
+                        EventNotificationServiceConstants.ERROR_TITLE_INTERNAL_ERROR,
+                        EventNotificationServiceConstants.FAILED_TO_DEREGISTER_TOPIC_ERROR_MSG,
+                        500);
+            }
 
-        return new TopicDTO(topic.getTopicId(), topic.getName(), topic.getDescription(),
-                TopicStatus.DEREGISTERED.getValue(), topic.getInitiatedBy());
+            return new TopicDTO(topic.getTopicId(), topic.getName(), topic.getDescription(),
+                    TopicStatus.DEREGISTERED.getValue(), topic.getInitiatedBy());
+        });
     }
 
     public Optional<TopicDTO> getTopic(String orgId, String topicIdStr) {
         if (orgId == null || orgId.trim().isEmpty() || topicIdStr == null || topicIdStr.trim().isEmpty()) {
             return Optional.empty();
         }
-        Optional<Topic> topicOpt = topicDAO.getTopicById(topicIdStr.trim(), orgId.trim());
-        if (topicOpt.isPresent() && orgId.trim().equalsIgnoreCase(topicOpt.get().getOrgId())) {
-            Topic t = topicOpt.get();
-            return Optional.of(
-                    new TopicDTO(t.getTopicId(), t.getName(), t.getDescription(), t.getStatus(), t.getInitiatedBy()));
-        }
-        return Optional.empty();
+        return DatabaseUtils.executeInTransaction(conn -> {
+            Optional<Topic> topicOpt = topicDAO.getTopicById(conn, topicIdStr.trim(), orgId.trim());
+            if (topicOpt.isPresent() && orgId.trim().equalsIgnoreCase(topicOpt.get().getOrgId())) {
+                Topic t = topicOpt.get();
+                return Optional.of(
+                        new TopicDTO(t.getTopicId(), t.getName(), t.getDescription(), t.getStatus(),
+                                t.getInitiatedBy()));
+            }
+            return Optional.empty();
+        });
     }
 }

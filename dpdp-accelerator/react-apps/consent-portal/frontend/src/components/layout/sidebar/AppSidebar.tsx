@@ -68,7 +68,7 @@ const CONSENT_ITEMS: SidebarItem[] = [
   {
     id: 'pending-consents',
     labelKey: 'sidebar.pendingConsents',
-    path: '/consents?state=PENDING',
+    path: '/consents?view=pending&state=PENDING',
     icon: <Clock3 size={18} />,
     requiredScope: REQUIRED_SCOPES.CONSENTS_READ_SELF,
   },
@@ -152,9 +152,7 @@ function mapPathToMenuId(pathname: string, search: string): string {
   }
 
   if (pathname.startsWith('/consents')) {
-    const state = new URLSearchParams(search).get('state')
-
-    if (state === 'PENDING') {
+    if (new URLSearchParams(search).get('view') === 'pending') {
       return 'pending-consents'
     }
 
@@ -214,10 +212,10 @@ function AppSidebar({ collapsed }: AppSidebarProps): React.JSX.Element {
   const visibleItems = [
     ...dashboardItems,
     ...consentItems,
-    ...eventItems,
-    ...catalogItems,
     ...complaintItems,
     ...administrationItems,
+    ...catalogItems,
+    ...eventItems,
   ]
 
   const activeItem = mapPathToMenuId(location.pathname, location.search)
@@ -270,18 +268,6 @@ function AppSidebar({ collapsed }: AppSidebarProps): React.JSX.Element {
           </Sidebar.Category>
         ) : null}
 
-        {eventItems.length > 0 ? (
-          <Sidebar.Category>
-            <Sidebar.CategoryLabel>{t('sidebar.events')}</Sidebar.CategoryLabel>
-            {eventItems.map((item) => (
-              <Sidebar.Item key={item.id} id={item.id}>
-                <Sidebar.ItemIcon>{item.icon}</Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>{t(item.labelKey)}</Sidebar.ItemLabel>
-              </Sidebar.Item>
-            ))}
-          </Sidebar.Category>
-        ) : null}
-
         {administrationItems.length > 0 ? (
           <Sidebar.Category>
             <Sidebar.CategoryLabel>{t('sidebar.administration')}</Sidebar.CategoryLabel>
@@ -298,6 +284,18 @@ function AppSidebar({ collapsed }: AppSidebarProps): React.JSX.Element {
           <Sidebar.Category>
             <Sidebar.CategoryLabel>{t('sidebar.catalog')}</Sidebar.CategoryLabel>
             {catalogItems.map((item) => (
+              <Sidebar.Item key={item.id} id={item.id}>
+                <Sidebar.ItemIcon>{item.icon}</Sidebar.ItemIcon>
+                <Sidebar.ItemLabel>{t(item.labelKey)}</Sidebar.ItemLabel>
+              </Sidebar.Item>
+            ))}
+          </Sidebar.Category>
+        ) : null}
+
+        {eventItems.length > 0 ? (
+          <Sidebar.Category>
+            <Sidebar.CategoryLabel>{t('sidebar.events')}</Sidebar.CategoryLabel>
+            {eventItems.map((item) => (
               <Sidebar.Item key={item.id} id={item.id}>
                 <Sidebar.ItemIcon>{item.icon}</Sidebar.ItemIcon>
                 <Sidebar.ItemLabel>{t(item.labelKey)}</Sidebar.ItemLabel>

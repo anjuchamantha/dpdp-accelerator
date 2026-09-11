@@ -18,7 +18,6 @@
 
 package org.wso2.dpdp.accelerator.event.notifications.dao;
 
-import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Subscription;
 
 import java.sql.Connection;
@@ -29,11 +28,7 @@ import java.util.Optional;
 
 public interface SubscriptionDAO {
 
-    void addSubscription(Subscription subscription);
-
     void addSubscription(Connection connection, Subscription subscription);
-
-    Optional<Subscription> getSubscriptionById(String subscriptionId, String orgId);
 
     Optional<Subscription> getSubscriptionById(Connection connection, String subscriptionId, String orgId);
 
@@ -45,22 +40,16 @@ public interface SubscriptionDAO {
     Optional<Subscription> lockSubscriptionForVerification(Connection connection, String subscriptionId,
             String orgId, String expectedStatus);
 
-    boolean updateSubscriptionStatus(String subscriptionId, String orgId, String status);
-
     boolean updateSubscriptionStatus(Connection connection, String subscriptionId, String orgId, String status);
-
-    boolean updateSubscriptionStatus(String subscriptionId, String orgId, String expectedStatus, String newStatus);
 
     boolean updateSubscriptionStatus(Connection connection, String subscriptionId, String orgId,
             String expectedStatus, String newStatus);
 
-    boolean deleteSubscriptionAtomic(String subscriptionId, String orgId, String expectedStatus);
-
     boolean deleteSubscriptionAtomic(Connection connection, String subscriptionId, String orgId,
             String expectedStatus);
 
-    PaginatedDAOResult<Subscription> listSubscriptions(String orgId, String status, String purposes, String search,
-            int limit, int offset, String sort);
+    PaginatedDAOResult<Subscription> listSubscriptions(Connection connection, String orgId, String status,
+            String purposes, String search, int limit, int offset, String sort);
 
     /**
      * Returns all subscriptions for a topic that are in a live state
@@ -69,20 +58,6 @@ public interface SubscriptionDAO {
      */
     List<Subscription> getLiveSubscriptionsByOrgAndTopic(Connection conn, String orgId, String topicId);
 
-    default List<Subscription> getLiveSubscriptionsByOrgAndTopic(String orgId, String topicId) {
-        Connection conn = DatabaseUtils.getDBConnection();
-        try {
-            List<Subscription> result = getLiveSubscriptionsByOrgAndTopic(conn, orgId, topicId);
-            DatabaseUtils.commitTransaction(conn);
-            return result;
-        } catch (RuntimeException e) {
-            DatabaseUtils.rollbackTransaction(conn);
-            throw e;
-        } finally {
-            DatabaseUtils.closeConnection(conn);
-        }
-    }
-
     /**
      * Returns and locks active subscriptions that are eligible for event fan-out.
      * The caller must hold the supplied transaction until all delivery rows have
@@ -90,14 +65,14 @@ public interface SubscriptionDAO {
      */
     List<Subscription> getActiveSubscriptionsForFanOut(Connection conn, String orgId, String topicId);
 
-    long countActiveSubscriptionsForTopic(String orgId, String topicId);
+    long countActiveSubscriptionsForTopic(Connection connection, String orgId, String topicId);
 
-    List<String> getPurposesBySubscriptionId(String subscriptionId, String orgId);
+    List<String> getPurposesBySubscriptionId(Connection connection, String subscriptionId, String orgId);
 
-    Map<String, List<String>> getPurposesBySubscriptionIds(List<String> subscriptionIds);
+    Map<String, List<String>> getPurposesBySubscriptionIds(Connection connection, List<String> subscriptionIds);
 
-    boolean hasPendingOrInFlightDeliveries(String subscriptionId, String orgId);
+    boolean hasPendingOrInFlightDeliveries(Connection connection, String subscriptionId, String orgId);
 
-    List<Subscription> getPendingSubscriptionsForRecovery(Timestamp updatedBefore, int limit);
+    List<Subscription> getPendingSubscriptionsForRecovery(Connection connection, Timestamp updatedBefore, int limit);
 
 }

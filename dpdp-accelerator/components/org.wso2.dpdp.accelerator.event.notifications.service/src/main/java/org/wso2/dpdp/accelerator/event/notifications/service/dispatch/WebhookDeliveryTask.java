@@ -19,6 +19,7 @@
 package org.wso2.dpdp.accelerator.event.notifications.service.dispatch;
 
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
+import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.common.util.LogSanitizer;
 import org.wso2.dpdp.accelerator.event.notifications.service.constants.EventNotificationServiceConstants;
 
@@ -32,6 +33,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -221,8 +223,11 @@ public class WebhookDeliveryTask implements Runnable {
                 DeliveryStatus.FAILED.getValue(), delivery.getAttemptCount() + 1, null,
                 delivery.getCreatedAt(), now, null);
         try {
-            deliveryDAO.recordPermanentFailure(newAudit(now, responseCode), failed);
-        } catch (Exception e) {
+            DatabaseUtils.<Void>executeInTransaction(conn -> {
+                deliveryDAO.recordPermanentFailure(conn, newAudit(now, responseCode), failed);
+                return null;
+            });
+        } catch (RuntimeException e) {
             LOG.error("Failed to mark malformed delivery [" + LogSanitizer.sanitize(delivery.getDeliveryId())
                     + "] as failed: " + LogSanitizer.sanitize(e.getMessage()), e);
         }
@@ -256,7 +261,8 @@ public class WebhookDeliveryTask implements Runnable {
                 now,
                 now);
         try {
-            boolean recorded = deliveryDAO.recordSuccessfulAttempt(audit, updated);
+            boolean recorded = DatabaseUtils.<Boolean>executeInTransaction(conn ->
+                    deliveryDAO.recordSuccessfulAttempt(conn, audit, updated));
             if (recorded) {
                 LOG.info("Webhook delivered [delivery=" + LogSanitizer.sanitize(delivery.getDeliveryId()) + ", event="
                         + LogSanitizer.sanitize(delivery.getEventId()) + ", topic=" + LogSanitizer.sanitize(topic) + ", attempt="
@@ -265,7 +271,7 @@ public class WebhookDeliveryTask implements Runnable {
                 LOG.debug("recordSuccessfulAttempt returned false for delivery ["
                         + LogSanitizer.sanitize(delivery.getDeliveryId()) + "].");
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.error("Failed to record successful attempt for delivery ["
                     + LogSanitizer.sanitize(delivery.getDeliveryId()) + "]: "
                     + LogSanitizer.sanitize(e.getMessage()), e);
@@ -277,7 +283,7 @@ public class WebhookDeliveryTask implements Runnable {
         WebhookDeliveryAudit audit = newAudit(now, responseCode);
         int newAttempt = delivery.getAttemptCount() + 1;
         int maxRetries = configurationService.getEventNotificationMaxRetries();
-        if (newAttempt >= maxRetries) {
+        if (newAttempt > maxRetries) {
             WebhookDelivery failed = new WebhookDelivery(
                     delivery.getDeliveryId(),
                     delivery.getSubscriptionId(),
@@ -289,11 +295,15 @@ public class WebhookDeliveryTask implements Runnable {
                     now,
                     null);
             try {
-                deliveryDAO.recordPermanentFailure(audit, failed);
+                DatabaseUtils.<Void>executeInTransaction(conn -> {
+                    deliveryDAO.recordPermanentFailure(conn, audit, failed);
+                    return null;
+                });
                 LOG.debug("Webhook delivery [" + LogSanitizer.sanitize(delivery.getDeliveryId()) + "] exhausted "
-                        + maxRetries + " attempts; marked as failed (last response="
+                        + maxRetries + " retries after " + newAttempt
+                        + " attempts; marked as failed (last response="
                         + LogSanitizer.sanitize(responseCode) + ").");
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 LOG.error("Failed to mark delivery [" + LogSanitizer.sanitize(delivery.getDeliveryId())
                         + "] as failed: " + LogSanitizer.sanitize(e.getMessage()), e);
             }
@@ -306,7 +316,8 @@ public class WebhookDeliveryTask implements Runnable {
         Timestamp nextRetryAt = new Timestamp(now.getTime() + delaySeconds * 1000L);
 
         try {
-            boolean released = deliveryDAO.recordRetryableFailure(audit, delivery.getDeliveryId(), newAttempt, nextRetryAt);
+            boolean released = DatabaseUtils.<Boolean>executeInTransaction(conn ->
+                    deliveryDAO.recordRetryableFailure(conn, audit, delivery.getDeliveryId(), newAttempt, nextRetryAt));
             if (released) {
                 LOG.debug("Webhook delivery [" + LogSanitizer.sanitize(delivery.getDeliveryId()) + "] attempt " + newAttempt
                         + " failed (response=" + LogSanitizer.sanitize(responseCode) + "); next retry at " + nextRetryAt
@@ -317,7 +328,7 @@ public class WebhookDeliveryTask implements Runnable {
                             + "] was no longer in_flight; release was a no-op.");
                 }
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             LOG.error("Failed to release webhook delivery [" + LogSanitizer.sanitize(delivery.getDeliveryId())
                     + "] for retry: " + LogSanitizer.sanitize(e.getMessage()), e);
         }

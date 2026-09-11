@@ -20,17 +20,24 @@ package org.wso2.dpdp.accelerator.event.notifications.service.impl;
 
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
+import org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager;
 import org.wso2.dpdp.accelerator.event.notifications.common.enums.TopicStatus;
 import org.wso2.dpdp.accelerator.event.notifications.dao.TopicDAO;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.Topic;
 import org.wso2.dpdp.accelerator.event.notifications.service.dto.TopicDTO;
 import org.wso2.dpdp.accelerator.event.notifications.service.exception.EventNotificationException;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Field;
+import java.sql.Connection;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
@@ -44,11 +51,35 @@ public class TopicConcurrencyAndHistoryTest {
     private TopicDAO topicDAO;
 
     private TopicServiceImpl topicService;
+    private Connection connection;
 
     @BeforeMethod
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
+        connection = mock(Connection.class);
+        DataSource dataSource = mock(DataSource.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        setStaticInstance(null);
+        setStaticDataSource(dataSource);
         topicService = new TopicServiceImpl(topicDAO);
+    }
+
+    @AfterMethod
+    public void tearDown() throws Exception {
+        setStaticDataSource(null);
+        setStaticInstance(null);
+    }
+
+    private static void setStaticDataSource(DataSource dataSource) throws Exception {
+        Field field = JDBCPersistenceManager.class.getDeclaredField("dataSource");
+        field.setAccessible(true);
+        field.set(null, dataSource);
+    }
+
+    private static void setStaticInstance(JDBCPersistenceManager instance) throws Exception {
+        Field field = JDBCPersistenceManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        field.set(null, instance);
     }
 
     @Test
@@ -58,8 +89,8 @@ public class TopicConcurrencyAndHistoryTest {
 
         // Active lookup returns empty because existing topic with same name was
         // deregistered
-        when(topicDAO.getTopicByOrgAndName(orgId, topicName)).thenReturn(Optional.empty());
-        when(topicDAO.addTopic(any())).thenReturn(true);
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq(orgId), eq(topicName))).thenReturn(Optional.empty());
+        when(topicDAO.addTopic(any(Connection.class), any(Topic.class))).thenReturn(true);
 
         TopicDTO createdTopic = topicService.createTopic(orgId, topicName, "Description for new topic");
 
@@ -68,7 +99,7 @@ public class TopicConcurrencyAndHistoryTest {
         assertNotEquals(createdTopic.getTopicId(), "old-uuid-123");
         assertEquals(createdTopic.getName(), topicName);
         assertEquals(createdTopic.getStatus(), TopicStatus.ACTIVE.getValue());
-        verify(topicDAO).addTopic(any());
+        verify(topicDAO).addTopic(any(Connection.class), any(Topic.class));
     }
 
     @Test
@@ -77,7 +108,7 @@ public class TopicConcurrencyAndHistoryTest {
         String topicName = "consent.update";
         Topic activeTopic = new Topic("old-uuid-123", orgId, topicName, "existing", TopicStatus.ACTIVE.getValue());
 
-        when(topicDAO.getTopicByOrgAndName(orgId, topicName)).thenReturn(Optional.of(activeTopic));
+        when(topicDAO.getTopicByOrgAndName(any(Connection.class), eq(orgId), eq(topicName))).thenReturn(Optional.of(activeTopic));
 
         try {
             topicService.createTopic(orgId, topicName, "Duplicate topic test");

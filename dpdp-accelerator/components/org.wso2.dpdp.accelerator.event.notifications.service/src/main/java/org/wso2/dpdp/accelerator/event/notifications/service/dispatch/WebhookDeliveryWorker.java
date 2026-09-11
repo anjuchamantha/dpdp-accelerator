@@ -19,6 +19,7 @@
 package org.wso2.dpdp.accelerator.event.notifications.service.dispatch;
 
 import org.wso2.dpdp.accelerator.common.config.DPDPConfigurationService;
+import org.wso2.dpdp.accelerator.common.util.DatabaseUtils;
 import org.wso2.dpdp.accelerator.common.util.LogSanitizer;
 import org.wso2.dpdp.accelerator.common.util.HTTPClientUtils;
 import org.wso2.dpdp.accelerator.event.notifications.common.enums.DeliveryStatus;
@@ -27,6 +28,7 @@ import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDelivery;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDeliveryDispatchContext;
 
 import java.net.http.HttpClient;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
@@ -141,14 +143,16 @@ public class WebhookDeliveryWorker implements Runnable {
             return Collections.emptyList();
         }
         try {
-            if (reclaim) {
-                int thresholdSeconds = getConfiguration().getEventNotificationStuckInFlightThresholdSeconds();
-                java.sql.Timestamp cutoff = new java.sql.Timestamp(
-                        System.currentTimeMillis() - thresholdSeconds * 1000L);
-                return deliveryDAO.getStuckInFlightWebhookDispatchContexts(limit, cutoff);
-            }
-            return deliveryDAO.getPendingWebhookDispatchContexts(limit);
-        } catch (Exception e) {
+            return DatabaseUtils.executeInTransaction(conn -> {
+                if (reclaim) {
+                    int thresholdSeconds = getConfiguration().getEventNotificationStuckInFlightThresholdSeconds();
+                    java.sql.Timestamp cutoff = new java.sql.Timestamp(
+                            System.currentTimeMillis() - thresholdSeconds * 1000L);
+                    return deliveryDAO.getStuckInFlightWebhookDispatchContexts(conn, limit, cutoff);
+                }
+                return deliveryDAO.getPendingWebhookDispatchContexts(conn, limit);
+            });
+        } catch (RuntimeException e) {
             LOG.error("Failed to fetch " + (reclaim ? "stuck" : "pending") + " webhook deliveries: "
                     + LogSanitizer.sanitize(e.getMessage()), e);
             return Collections.emptyList();
@@ -216,8 +220,9 @@ public class WebhookDeliveryWorker implements Runnable {
 
     private boolean claim(String deliveryId) {
         try {
-            return deliveryDAO.claimWebhookDelivery(deliveryId);
-        } catch (Exception e) {
+            return DatabaseUtils.<Boolean>executeInTransaction(conn ->
+                    deliveryDAO.claimWebhookDelivery(conn, deliveryId));
+        } catch (RuntimeException e) {
             LOG.error("claimWebhookDelivery failed for [" + LogSanitizer.sanitize(deliveryId) + "]: "
                     + LogSanitizer.sanitize(e.getMessage()), e);
             return false;
@@ -226,8 +231,9 @@ public class WebhookDeliveryWorker implements Runnable {
 
     private boolean claimStuck(String deliveryId, java.sql.Timestamp cutoff) {
         try {
-            return deliveryDAO.claimStuckWebhookDelivery(deliveryId, cutoff);
-        } catch (Exception e) {
+            return DatabaseUtils.<Boolean>executeInTransaction(conn ->
+                    deliveryDAO.claimStuckWebhookDelivery(conn, deliveryId, cutoff));
+        } catch (RuntimeException e) {
             LOG.error("claimStuckWebhookDelivery failed for [" + LogSanitizer.sanitize(deliveryId) + "]: "
                     + LogSanitizer.sanitize(e.getMessage()), e);
             return false;
@@ -268,8 +274,11 @@ public class WebhookDeliveryWorker implements Runnable {
                 new java.sql.Timestamp(System.currentTimeMillis()),
                 null);
         try {
-            deliveryDAO.updateWebhookDeliveryStatus(failed);
-        } catch (Exception e) {
+            DatabaseUtils.<Void>executeInTransaction(conn -> {
+                deliveryDAO.updateWebhookDeliveryStatus(conn, failed);
+                return null;
+            });
+        } catch (RuntimeException e) {
             LOG.error("Failed to mark unrecoverable webhook delivery ["
                     + LogSanitizer.sanitize(delivery.getDeliveryId()) + "] as failed: "
                     + LogSanitizer.sanitize(e.getMessage()), e);

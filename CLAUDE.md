@@ -38,12 +38,20 @@ Output: `dpdp-accelerator/accelerators/dpdp-is/target/wso2-dpdpiam-accelerator-<
 | Frontend lint / format | `npm run lint` / `npm run format:check` |
 | E2E (Playwright, needs a deployed IS) | `cd dpdp-integration-test-suite && ./run-e2e.sh [tests/03-consents]` |
 
-CI splits into three workflows. `.github/workflows/pr-build.yml` builds the Java and frontend
+CI splits into four workflows. `.github/workflows/pr-build.yml` builds the Java and frontend
 modules on every PR to `main` and `dev`. The E2E suite is not automatic: `pr-e2e.yml` deploys an
 Identity Server from scratch and runs Playwright against it only once a maintainer applies the
 `Action/trigger-e2e` label, because the job runs PR code with write permissions and repository
 secrets in scope. `pr-e2e-gate.yml` strips that label on every new push and publishes the
-`E2E (label-gated)` commit status, so the label can never carry over to unreviewed code. Role *membership*
+`E2E (label-gated)` commit status, so the label can never carry over to unreviewed code.
+
+The Identity Server under test comes from the `updates2.0` S3 bucket (`IS_PACK_S3_URI`) with U2
+updates applied. The published GitHub release zip is *not* U2-updatable — don't reintroduce that
+path. `e2e.yml` still accepts `is_source: master`, which `weekly-e2e-is-master.yml` runs on a
+schedule so upstream breakage surfaces before the next IS upgrade rather than during it. The
+updated pack is cached, and **only `workflow_dispatch` / `schedule` / `push` runs may write that
+cache** — never the labelled-PR path, or a PR could poison the pack for every later run,
+including the release gate. Keep the restore read-only. Role *membership*
 is the one thing the accelerator never provisions, so both CI and a fresh local install get their
 accounts from `dpdp-integration-test-suite/scripts/provision-test-users.sh` (idempotent).
 

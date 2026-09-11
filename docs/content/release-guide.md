@@ -1,9 +1,14 @@
+---
+title: Release guide
+sidebar_position: 5
+---
+
 # Release guide
 
 How to cut a release of the DPDP accelerator, and what the pipeline does on your behalf.
 
 Releases are built by the **Release builder** workflow
-([`.github/workflows/release-builder.yml`](../.github/workflows/release-builder.yml)). It is
+([`.github/workflows/release-builder.yml`](https://github.com/wso2/dpdp-accelerator/blob/main/.github/workflows/release-builder.yml)). It is
 dispatched by hand — nothing releases on a push or a merge.
 
 ## What a release produces
@@ -62,10 +67,17 @@ the zip. Pairing it with `run_e2e: off` finishes in a few minutes.
 
 Same inputs, `dry_run` off.
 
-Budget roughly **two hours** with the E2E gate on: it builds Identity Server from
-`product-is` master, because the published-release + U2 update path is currently blocked
-upstream (the public release zip is missing the `migration-resources/` tree the update tool
-needs).
+The gate tests the U2-updated 7.3.0 pack, pulled from the `updates2.0` S3 bucket named by
+the `IS_PACK_S3_URI` secret. The published GitHub release zip is not U2-updatable — it lacks
+the `migration-resources/` tree the update tool needs — so that path was abandoned.
+
+Duration is hard to pin down: the E2E job has historically taken 18–25 minutes, and how much
+`wso2update_linux` adds is not yet measured. A release run may also restore an already-warm
+pack cache and skip the download and update entirely. Check a recent run's step timings
+rather than trusting a number here.
+
+`product-is` master is still exercised, but on a schedule — see
+`.github/workflows/weekly-e2e-is-master.yml`.
 
 ### 5. Nothing — the version bump is automatic
 
@@ -89,7 +101,7 @@ prepare ─┬─ e2e ──┐
   non-prerelease off `main`. Everything downstream reads its outputs rather than
   re-deriving them.
 - **e2e** — the same suite that gates a PR, via the reusable
-  [`e2e.yml`](../.github/workflows/e2e.yml). Skippable with `run_e2e: off`.
+  [`e2e.yml`](https://github.com/wso2/dpdp-accelerator/blob/main/.github/workflows/e2e.yml). Skippable with `run_e2e: off`.
 - **build** — `versions:set`, then `mvn clean install`, then asserts the zip exists at the
   exact expected path. That assertion is also what proves `versions:set` reached every
   module.

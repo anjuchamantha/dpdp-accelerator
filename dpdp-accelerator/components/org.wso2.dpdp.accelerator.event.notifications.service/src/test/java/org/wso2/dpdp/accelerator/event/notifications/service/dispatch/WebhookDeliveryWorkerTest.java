@@ -30,6 +30,7 @@ import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDelivery;
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDeliveryDispatchContext;
 
 import java.net.http.HttpClient;
+import java.sql.Connection;
 import java.sql.Timestamp;
 import java.util.Collections;
 import java.util.concurrent.ScheduledExecutorService;
@@ -58,18 +59,43 @@ public class WebhookDeliveryWorkerTest {
     @Mock
     private DPDPConfigurationService configurationService;
 
+    @Mock
+    private Connection connection;
+
     private QueueingExecutor scheduler;
     private HttpClient httpClient;
 
     @BeforeMethod
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
+        javax.sql.DataSource dataSource = org.mockito.Mockito.mock(javax.sql.DataSource.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        setStaticInstance(null);
+        setStaticDataSource(dataSource);
         // Claims now happen inside executing work, so tests control exactly when queued
         // units start by draining this executor explicitly.
         scheduler = new QueueingExecutor();
         httpClient = HTTPClientUtils.getHttpClient();
         when(configurationService.getEventNotificationDeliveryWorkerBatchSize()).thenReturn(50);
         when(configurationService.getEventNotificationStuckInFlightThresholdSeconds()).thenReturn(10);
+    }
+
+    @org.testng.annotations.AfterMethod
+    public void tearDown() throws Exception {
+        setStaticDataSource(null);
+        setStaticInstance(null);
+    }
+
+    private static void setStaticDataSource(javax.sql.DataSource dataSource) throws Exception {
+        java.lang.reflect.Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class.getDeclaredField("dataSource");
+        field.setAccessible(true);
+        field.set(null, dataSource);
+    }
+
+    private static void setStaticInstance(org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager instance) throws Exception {
+        java.lang.reflect.Field field = org.wso2.dpdp.accelerator.common.persistence.JDBCPersistenceManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        field.set(null, instance);
     }
 
     // Minimal ScheduledExecutorService that queues work until the test explicitly starts it.
@@ -143,48 +169,48 @@ public class WebhookDeliveryWorkerTest {
         for (int i = 0; i < 50; i++) {
             full.add(context("d" + i, 0));
         }
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt())).thenReturn(full);
-        when(deliveryDAO.claimWebhookDelivery(anyString())).thenReturn(true);
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt())).thenReturn(full);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), anyString())).thenReturn(true);
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         int[] counts = worker.runTick();
 
         assertEquals(counts[0], 50, "50 pending rows should be submitted");
-        verify(deliveryDAO, never()).getStuckInFlightWebhookDispatchContexts(anyInt());
-        verify(deliveryDAO, never()).claimWebhookDelivery(anyString());
+        verify(deliveryDAO, never()).getStuckInFlightWebhookDispatchContexts(any(Connection.class), anyInt(), any());
+        verify(deliveryDAO, never()).claimWebhookDelivery(any(Connection.class), anyString());
     }
 
     @Test
     public void testTickSkipsRowsThatCannotBeClaimed() {
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(java.util.Collections.singletonList(context("d1", 0)));
-        when(deliveryDAO.claimWebhookDelivery(eq("d1"))).thenReturn(false);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("d1"))).thenReturn(false);
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         int[] counts = worker.runTick();
 
         assertEquals(counts[0], 1, "The candidate is queued before its claim is attempted");
         scheduler.runAll();
-        verify(deliveryDAO).claimWebhookDelivery("d1");
+        verify(deliveryDAO).claimWebhookDelivery(any(Connection.class), eq("d1"));
     }
 
     @Test
     public void testEmptyPendingTriggersStuckPass() {
         // No pending rows; the second pass should pick up stuck in-flight rows.
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(Collections.emptyList());
-        when(deliveryDAO.getStuckInFlightWebhookDispatchContexts(anyInt(), any()))
+        when(deliveryDAO.getStuckInFlightWebhookDispatchContexts(any(Connection.class), anyInt(), any()))
                 .thenReturn(java.util.Collections.singletonList(context("stuck-1", 3)));
         // Stuck rows are claimed via claimStuckWebhookDelivery (cutoff-guarded), not the
         // regular claimWebhookDelivery, so the pending-claim mock is intentionally absent.
-        when(deliveryDAO.claimStuckWebhookDelivery(eq("stuck-1"), any())).thenReturn(true);
+        when(deliveryDAO.claimStuckWebhookDelivery(any(Connection.class), eq("stuck-1"), any())).thenReturn(true);
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         int[] counts = worker.runTick();
 
         assertEquals(counts[0], 0, "no pending to submit");
         assertEquals(counts[1], 1, "one stuck row reclaimed");
-        verify(deliveryDAO, never()).claimStuckWebhookDelivery(anyString(), any());
+        verify(deliveryDAO, never()).claimStuckWebhookDelivery(any(Connection.class), anyString(), any());
     }
 
     @Test
@@ -194,24 +220,24 @@ public class WebhookDeliveryWorkerTest {
         WebhookDeliveryDispatchContext broken = new WebhookDeliveryDispatchContext(
                 delivery, "org-1", "group-1", null, "secret", "{}", new Timestamp(0), "accounts");
 
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(java.util.Collections.singletonList(broken));
-        when(deliveryDAO.claimWebhookDelivery(eq("d1"))).thenReturn(true);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("d1"))).thenReturn(true);
+        when(deliveryDAO.updateWebhookDeliveryStatus(any(Connection.class), any())).thenReturn(true);
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         int[] counts = worker.runTick();
 
         assertEquals(counts[0], 1);
         scheduler.runAll();
-        verify(deliveryDAO).updateWebhookDeliveryStatus(any());
+        verify(deliveryDAO).updateWebhookDeliveryStatus(any(Connection.class), any());
     }
 
     @Test
     public void testPendingFetchFailureDoesNotStopTick() {
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenThrow(new RuntimeException("pending fetch failed"));
-        when(deliveryDAO.getStuckInFlightWebhookDispatchContexts(anyInt(), any()))
+        when(deliveryDAO.getStuckInFlightWebhookDispatchContexts(any(Connection.class), anyInt(), any()))
                 .thenReturn(Collections.emptyList());
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient,
@@ -224,9 +250,9 @@ public class WebhookDeliveryWorkerTest {
 
     @Test
     public void testClaimFailureDoesNotSubmitDelivery() {
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(Collections.singletonList(context("claim-failure", 0)));
-        when(deliveryDAO.claimWebhookDelivery(eq("claim-failure")))
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("claim-failure")))
                 .thenThrow(new RuntimeException("claim failed"));
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient,
@@ -235,35 +261,35 @@ public class WebhookDeliveryWorkerTest {
 
         assertEquals(counts[0], 1);
         scheduler.runAll();
-        verify(deliveryDAO).claimWebhookDelivery("claim-failure");
+        verify(deliveryDAO).claimWebhookDelivery(any(Connection.class), eq("claim-failure"));
     }
 
     @Test
     public void testExecutorRejectionLeavesDeliveryUnclaimed() {
         WebhookDeliveryDispatchContext dispatchContext = context("executor-rejection", 0);
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(Collections.singletonList(dispatchContext));
-        when(deliveryDAO.claimWebhookDelivery(eq("executor-rejection"))).thenReturn(true);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("executor-rejection"))).thenReturn(true);
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, new RejectingExecutor(), httpClient,
                 configurationService);
         int[] counts = worker.runTick();
 
         assertEquals(counts[0], 0);
-        verify(deliveryDAO, never()).claimWebhookDelivery(anyString());
-        verify(deliveryDAO, never()).updateWebhookDeliveryStatus(any());
+        verify(deliveryDAO, never()).claimWebhookDelivery(any(Connection.class), anyString());
+        verify(deliveryDAO, never()).updateWebhookDeliveryStatus(any(Connection.class), any());
     }
 
     @Test
     public void testMarkUnrecoverableUpdateFailureIsHandled() {
         WebhookDeliveryDispatchContext dispatchContext = context("update-failure", 0);
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(Collections.singletonList(new WebhookDeliveryDispatchContext(
                         dispatchContext.getDelivery(), dispatchContext.getOrgId(), dispatchContext.getGroupId(),
                         null, dispatchContext.getSharedSecret(), dispatchContext.getPayload(),
                         dispatchContext.getDelivery().getUpdatedAt(), dispatchContext.getTopic())));
-        when(deliveryDAO.claimWebhookDelivery(eq("update-failure"))).thenReturn(true);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("update-failure"))).thenReturn(true);
         doThrow(new RuntimeException("status update failed"))
-                .when(deliveryDAO).updateWebhookDeliveryStatus(any());
+                .when(deliveryDAO).updateWebhookDeliveryStatus(any(Connection.class), any());
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient,
                 configurationService);
@@ -281,16 +307,16 @@ public class WebhookDeliveryWorkerTest {
                 delivery, "org-1", "group-1", "https://callback.example.com/hook", "secret", null,
                 new Timestamp(0), "accounts");
 
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(java.util.Collections.singletonList(broken));
-        when(deliveryDAO.claimWebhookDelivery(eq("d1"))).thenReturn(true);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("d1"))).thenReturn(true);
+        when(deliveryDAO.updateWebhookDeliveryStatus(any(Connection.class), any())).thenReturn(true);
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         worker.runTick();
 
         scheduler.runAll();
-        verify(deliveryDAO).updateWebhookDeliveryStatus(any());
+        verify(deliveryDAO).updateWebhookDeliveryStatus(any(Connection.class), any());
     }
 
     @Test
@@ -300,13 +326,13 @@ public class WebhookDeliveryWorkerTest {
         WebhookDeliveryDispatchContext broken = new WebhookDeliveryDispatchContext(
                 delivery, "org-1", "group-1", null, "secret", "{}", new Timestamp(0), "accounts");
 
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(java.util.Collections.singletonList(broken));
-        when(deliveryDAO.claimWebhookDelivery(eq("d1"))).thenReturn(true);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("d1"))).thenReturn(true);
 
         org.mockito.ArgumentCaptor<WebhookDelivery> captor =
                 org.mockito.ArgumentCaptor.forClass(WebhookDelivery.class);
-        when(deliveryDAO.updateWebhookDeliveryStatus(captor.capture())).thenReturn(true);
+        when(deliveryDAO.updateWebhookDeliveryStatus(any(Connection.class), captor.capture())).thenReturn(true);
 
         WebhookDeliveryWorker worker = new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService);
         worker.runTick();
@@ -321,14 +347,14 @@ public class WebhookDeliveryWorkerTest {
         WebhookDeliveryDispatchContext unsigned = new WebhookDeliveryDispatchContext(
                 valid.getDelivery(), valid.getOrgId(), valid.getGroupId(), valid.getCallbackUrl(), " ", valid.getPayload(),
                 valid.getDelivery().getUpdatedAt(), valid.getTopic());
-        when(deliveryDAO.getPendingWebhookDispatchContexts(anyInt()))
+        when(deliveryDAO.getPendingWebhookDispatchContexts(any(Connection.class), anyInt()))
                 .thenReturn(Collections.singletonList(unsigned));
-        when(deliveryDAO.claimWebhookDelivery("missing-secret")).thenReturn(true);
-        when(deliveryDAO.updateWebhookDeliveryStatus(any())).thenReturn(true);
+        when(deliveryDAO.claimWebhookDelivery(any(Connection.class), eq("missing-secret"))).thenReturn(true);
+        when(deliveryDAO.updateWebhookDeliveryStatus(any(Connection.class), any())).thenReturn(true);
 
         new WebhookDeliveryWorker(deliveryDAO, scheduler, httpClient, configurationService).runTick();
         scheduler.runAll();
 
-        verify(deliveryDAO).updateWebhookDeliveryStatus(any());
+        verify(deliveryDAO).updateWebhookDeliveryStatus(any(Connection.class), any());
     }
 }

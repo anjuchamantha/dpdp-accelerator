@@ -213,11 +213,14 @@ function ComplaintDetailPage(): React.JSX.Element {
                 getStatusLabel={() => ''}
                 isSending={sendMessageMutation.isPending}
                 onSend={(message, files, _visibility, _nextStatus, onSent) => {
-                  // A reply only advances the workflow when the officer was waiting on the
-                  // client for more information - any other status (IN_PROGRESS, OPEN, etc.)
-                  // is left unchanged, since the officer hasn't asked for anything here.
+                  // A reply advances the workflow in the two cases the ball is in the client's
+                  // court: the officer asked for more information (WAITING_ON_CLIENT), or the
+                  // complaint was closed and the client is disputing it - a reply is the only
+                  // way a RESOLVED complaint reopens, since the officer has no manual
+                  // transition out of it. Any other status (OPEN, IN_PROGRESS) is left
+                  // unchanged, since the officer hasn't asked for anything there.
                   const toStatus =
-                    complaint.status === 'WAITING_ON_CLIENT'
+                    complaint.status === 'WAITING_ON_CLIENT' || complaint.status === 'RESOLVED'
                       ? 'AWAITING_INTERNAL_REVIEW'
                       : undefined
 

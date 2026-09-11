@@ -152,8 +152,8 @@ describe('MainLayout', () => {
     expect(within(breadcrumbs).getByText('My Consents')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('shows My Pending Consents for the self-service registry filtered to pending', () => {
-    renderHeaderBreadcrumbs('/consents?state=PENDING')
+  it('shows My Pending Consents for the dedicated pending view', () => {
+    renderHeaderBreadcrumbs('/consents?view=pending&state=PENDING')
 
     const breadcrumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
     expect(within(breadcrumbs).getByText('My Pending Consents')).toHaveAttribute(

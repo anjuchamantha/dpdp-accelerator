@@ -92,7 +92,7 @@ public class DaoWritePathCoverageTest {
         Map<String, PollDeliveryError> errors = new LinkedHashMap<>();
         errors.put("delivery-2", new PollDeliveryError("processing_failed", "Unable to process event"));
 
-        dao.updatePollDeliveryStatusesByDeliveryIds(" org-1 ", " group-1 ", " subscription-1 ",
+        dao.updatePollDeliveryStatusesByDeliveryIds(connection, " org-1 ", " group-1 ", " subscription-1 ",
                 Collections.singletonList(" delivery-1 "), errors);
 
         verify(statement, times(2)).addBatch();
@@ -109,18 +109,18 @@ public class DaoWritePathCoverageTest {
         WebhookDeliveryAudit audit = new WebhookDeliveryAudit("a-1", "e-1", "d-1", "org-1", "500", now, now);
         DeliveryDAOImpl dao = new DeliveryDAOImpl();
 
-        assertTrue(dao.updateWebhookDeliveryStatus(webhook));
-        assertTrue(dao.recordSuccessfulAttempt(audit, webhook));
-        assertTrue(dao.recordRetryableFailure(audit, "d-1", 1, now));
-        assertTrue(dao.recordPermanentFailure(audit, webhook));
-        assertTrue(dao.addWebhookDeliveryAudit(audit));
-        assertTrue(dao.addPollDelivery(new PollDelivery("p-1", "s-1", "e-1", "pending", now, null)));
-        assertTrue(dao.claimWebhookDelivery("d-1"));
-        assertTrue(dao.claimStuckWebhookDelivery("d-1", now));
-        assertTrue(dao.releaseWebhookDelivery("d-1", 2, now));
-        assertTrue(dao.claimPollDelivery("p-1"));
-        assertTrue(dao.updatePollDeliveryStatus("p-1", "completed"));
-        assertTrue(dao.updatePollDeliveryStatus("p-1", "completed", "acknowledged"));
+        assertTrue(dao.updateWebhookDeliveryStatus(connection, webhook));
+        assertTrue(dao.recordSuccessfulAttempt(connection, audit, webhook));
+        assertTrue(dao.recordRetryableFailure(connection, audit, "d-1", 1, now));
+        assertTrue(dao.recordPermanentFailure(connection, audit, webhook));
+        assertTrue(dao.addWebhookDeliveryAudit(connection, audit));
+        assertTrue(dao.addPollDelivery(connection, new PollDelivery("p-1", "s-1", "e-1", "pending", now, null)));
+        assertTrue(dao.claimWebhookDelivery(connection, "d-1"));
+        assertTrue(dao.claimStuckWebhookDelivery(connection, "d-1", now));
+        assertTrue(dao.releaseWebhookDelivery(connection, "d-1", 2, now));
+        assertTrue(dao.claimPollDelivery(connection, "p-1"));
+        assertTrue(dao.updatePollDeliveryStatus(connection, "p-1", "completed"));
+        assertTrue(dao.updatePollDeliveryStatus(connection, "p-1", "completed", "acknowledged"));
     }
 
     @Test
@@ -132,9 +132,9 @@ public class DaoWritePathCoverageTest {
         WebhookDeliveryAudit audit = new WebhookDeliveryAudit("a-1", "e-1", "d-1", "org-1", "200", now, now);
         DeliveryDAOImpl dao = new DeliveryDAOImpl();
 
-        assertFalse(dao.recordSuccessfulAttempt(audit, delivery));
-        assertFalse(dao.recordRetryableFailure(audit, "d-1", 1, now));
-        assertFalse(dao.recordPermanentFailure(audit, delivery));
+        assertFalse(dao.recordSuccessfulAttempt(connection, audit, delivery));
+        assertFalse(dao.recordRetryableFailure(connection, audit, "d-1", 1, now));
+        assertFalse(dao.recordPermanentFailure(connection, audit, delivery));
 
         verify(connection, never()).prepareStatement(contains("INSERT INTO WEBHOOK_DELIVERY_AUDIT"));
     }
@@ -200,16 +200,15 @@ public class DaoWritePathCoverageTest {
         events.addEventPurposes(connection, "e", Collections.emptyList());
 
         TopicDAOImpl topics = new TopicDAOImpl();
-        assertTrue(topics.addTopic(new Topic("t", "org", "name", "desc", "active")));
-        assertTrue(topics.updateTopicStatus("t", "org", TopicStatus.ACTIVE));
+        assertTrue(topics.addTopic(connection, new Topic("t", "org", "name", "desc", "active")));
+        assertTrue(topics.updateTopicStatus(connection, "t", "org", TopicStatus.ACTIVE));
         expectThrows(IllegalArgumentException.class,
                 () -> topics.getTopicByOrgAndName(null, "org", "name"));
 
         SubscriptionDAOImpl subscriptions = new SubscriptionDAOImpl();
-        assertTrue(subscriptions.updateSubscriptionStatus("s", "org", "active"));
-        assertTrue(subscriptions.updateSubscriptionStatus("s", "org", null, "active"));
+        assertTrue(subscriptions.updateSubscriptionStatus(connection, "s", "org", "active"));
         assertTrue(subscriptions.updateSubscriptionStatus(connection, "s", "org", null, "active"));
-        assertTrue(subscriptions.deleteSubscriptionAtomic("s", "org", "active"));
+        assertTrue(subscriptions.deleteSubscriptionAtomic(connection, "s", "org", "active"));
         DeliveryDAOImpl deliveries = new DeliveryDAOImpl();
         expectThrows(IllegalArgumentException.class,
                 () -> deliveries.addWebhookDelivery(null,
@@ -217,10 +216,10 @@ public class DaoWritePathCoverageTest {
         assertTrue(deliveries.claimWebhookDelivery(connection, " "));
         assertTrue(deliveries.claimStuckWebhookDelivery(connection, null, now));
         org.testng.Assert.assertFalse(deliveries.releaseWebhookDelivery(connection, "", 0, now));
-        deliveries.updatePollDeliveryStatusesByDeliveryIds("org", "group", "subscription",
+        deliveries.updatePollDeliveryStatusesByDeliveryIds(connection, "org", "group", "subscription",
                 Collections.emptyList(), Collections.emptyMap());
         expectThrows(IllegalArgumentException.class,
-                () -> deliveries.updatePollDeliveryStatusesByDeliveryIds("", "group", "subscription",
+                () -> deliveries.updatePollDeliveryStatusesByDeliveryIds(null, "", "group", "subscription",
                         null, null));
     }
 

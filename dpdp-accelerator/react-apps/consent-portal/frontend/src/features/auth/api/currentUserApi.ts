@@ -53,7 +53,9 @@ export async function fetchCurrentUser(): Promise<CurrentUser> {
     throw new Error('no authenticated session')
   }
 
-  const userId = (user.sub ?? user.username ?? '').trim()
+  // Consent subjects and authorizations use the Identity Server username. The OIDC subject is
+  // commonly an internal UUID and does not match those consent identifiers.
+  const userId = (user.username ?? user.sub ?? '').trim()
   if (!userId) {
     throw new Error('the authenticated session has no subject')
   }

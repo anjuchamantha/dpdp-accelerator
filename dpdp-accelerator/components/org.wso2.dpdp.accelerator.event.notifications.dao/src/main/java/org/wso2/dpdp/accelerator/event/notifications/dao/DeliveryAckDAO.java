@@ -20,11 +20,12 @@ package org.wso2.dpdp.accelerator.event.notifications.dao;
 
 import org.wso2.dpdp.accelerator.event.notifications.dao.model.WebhookDeliveryAck;
 
+import java.sql.Connection;
 import java.util.Optional;
 
 public interface DeliveryAckDAO {
 
-    boolean addDeliveryAck(WebhookDeliveryAck ack);
+    boolean addDeliveryAck(Connection conn, WebhookDeliveryAck ack);
 
-    Optional<WebhookDeliveryAck> getDeliveryAckByDeliveryId(String deliveryId);
+    Optional<WebhookDeliveryAck> getDeliveryAckByDeliveryId(Connection conn, String deliveryId);
 }

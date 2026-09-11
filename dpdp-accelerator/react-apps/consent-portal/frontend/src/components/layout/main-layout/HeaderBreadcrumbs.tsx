@@ -181,7 +181,7 @@ function buildBreadcrumbItems(
   }
 
   if (pathname.startsWith('/consents')) {
-    const isPending = new URLSearchParams(search).get('state') === 'PENDING'
+    const isPending = new URLSearchParams(search).get('view') === 'pending'
 
     return [
       {

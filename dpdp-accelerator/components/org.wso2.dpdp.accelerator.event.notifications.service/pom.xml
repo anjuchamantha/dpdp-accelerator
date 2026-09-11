@@ -213,6 +213,7 @@
                             org.osgi.framework;version="[1.8,2)",
                             com.fasterxml.jackson.core;version="${jackson.imp.pkg.version.range}",
                             com.fasterxml.jackson.databind;version="${jackson.imp.pkg.version.range}",
+                            java.net.http,
                             *
                         </Import-Package>
                     </instructions>
