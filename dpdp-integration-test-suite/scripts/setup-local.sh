@@ -45,8 +45,16 @@ fi
 echo "==> Ensuring the Chromium browser is installed"
 npx playwright install chromium
 
-if [ -f "${LOCAL_CONFIG}" ]; then
-  echo "==> ${LOCAL_CONFIG} already exists - leaving it alone"
+# Keyed on the password itself, not on the file: the bootstrap step below writes
+# provisioningClient into this same file, so running that first leaves the file present with no
+# password in it. Testing for the file would then skip generation for good - provisioning would
+# fail pointing back here, and re-running would skip again.
+if [ -f "${LOCAL_CONFIG}" ] && python3 -c '
+import json, sys
+config = json.load(open(sys.argv[1]))
+sys.exit(0 if (config.get("personas", {}).get("user") or {}).get("password") else 1)
+' "${LOCAL_CONFIG}" 2>/dev/null; then
+  echo "==> ${LOCAL_CONFIG} already carries the test-account password - leaving it alone"
 else
   echo "==> Generating the test-account password into ${LOCAL_CONFIG}"
   # Not committed, and never reused across environments: the accounts exist only for this
@@ -55,13 +63,23 @@ else
   PASSWORD="${password}" python3 - "${LOCAL_CONFIG}" <<'PYEOF'
 import json, os, sys
 
+path = sys.argv[1]
 password = os.environ['PASSWORD']
-with open(sys.argv[1], 'w') as handle:
-    json.dump(
-        {'personas': {name: {'password': password} for name in ('user', 'user2', 'consentAdmin')}},
-        handle,
-        indent=2,
-    )
+
+# Merged into whatever is already there rather than written fresh, so a provisioningClient the
+# bootstrap wrote earlier survives.
+try:
+    with open(path) as handle:
+        config = json.load(handle)
+except (FileNotFoundError, ValueError):
+    config = {}
+
+personas = config.setdefault('personas', {})
+for name in ('user', 'user2', 'consentAdmin'):
+    personas.setdefault(name, {})['password'] = password
+
+with open(path, 'w') as handle:
+    json.dump(config, handle, indent=2)
     handle.write('\n')
 PYEOF
   chmod 600 "${LOCAL_CONFIG}"

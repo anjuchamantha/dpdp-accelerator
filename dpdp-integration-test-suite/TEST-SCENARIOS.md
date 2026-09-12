@@ -130,7 +130,7 @@ The largest area. **Consent creation has no UI at all**, so `seedConsent` create
 | --- | --- | --- |
 | `03.02.01` | The detail page renders subject, service, and purpose/element structure | Subject, service id, "Not applicable", and the element row under its expanded purpose. |
 | `03.02.02` | An unknown consent id shows the load-failed message with a way back to the registry |  |
-| `03.02.03` | A different user cannot open another user's consent by its URL | Ownership isolation. Skips unless `TEST_USER_2_*` is configured. |
+| `03.02.03` | A different user cannot open another user's consent by its URL | Ownership isolation. Skips unless `personas.user2` is configured. |
 
 ### `03.03-user-searching-consents.spec.ts`
 
@@ -174,7 +174,7 @@ The largest area. **Consent creation has no UI at all**, so `seedConsent` create
 | `03.07.01` | Approving a Pending consent records CREATE then AUTHORIZE_APPROVE, oldest-first in the table and newest-first in the dialog | CREATE (admin) then AUTHORIZE_APPROVE (user); oldest-first in the lifecycle table, newest-first in the dialog; initial-snapshot chip on CREATE; a real diff tag on APPROVE. |
 | `03.07.02` | Rejecting a Pending consent records AUTHORIZE_REJECT with a diffed authorization |  |
 | `03.07.03` | A full self-service lifecycle (created, approved, then revoked) is captured in order end to end | All three entries in strict order in both views; the revoke entry renders a real diff. |
-| `03.07.04` | A delegated consent (parent approving on behalf of a child) attributes the approval to the parent, not the subject | The child's own history attributes the approval to the **parent**. Skips unless `TEST_USER_2_*` is configured. |
+| `03.07.04` | A delegated consent (parent approving on behalf of a child) attributes the approval to the parent, not the subject | The child's own history attributes the approval to the **parent**. Skips unless `personas.user2` is configured. |
 
 ### `03.08-admin-viewing-consent-history.spec.ts`
 
@@ -382,7 +382,7 @@ Mixed UI and API. Two server behaviours drive most of the test design: `groupId`
 
 | ID | Scenario | Notes |
 | --- | --- | --- |
-| `08.02.01` | The Topics list renders active and deregistered rows with pagination controls |  |
+| `08.02.01` | The Topics list renders and paginates | Seeds one active topic. Deliberately not asserting a deregistered row - nothing here creates one. |
 | `08.02.02` | Searching by a partial topic name finds the matching row | Asserted with a filtered locator, never a loop over `rows.all()` - that snapshot approach flaked in CI twice. |
 
 ### `08.03-admin-viewing-subscriptions.spec.ts`

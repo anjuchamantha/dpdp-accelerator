@@ -32,6 +32,7 @@ import { join, basename, dirname, relative } from 'node:path'
 const ROOT = join(import.meta.dirname, '..')
 const TESTS = join(ROOT, 'tests')
 const CATALOGUE = 'TEST-SCENARIOS.md'
+const README = 'README.md'
 
 const problems = []
 const fail = (where, message) => problems.push(`${where}: ${message}`)
@@ -211,6 +212,25 @@ if (catalogue) {
     }
     if (Number(counts[2]) !== expectedFiles) {
       fail(CATALOGUE, `${area}: says ${counts[2]} spec files, the tree has ${expectedFiles}`)
+    }
+  }
+}
+
+// ── README.md repeats the per-area counts in its own table. A third copy of the same numbers is
+// ── a third thing to forget, so it is checked against the tree too.
+let readme
+try {
+  readme = readFileSync(join(ROOT, README), 'utf8')
+} catch {
+  readme = undefined
+}
+if (readme) {
+  for (const area of areas) {
+    const expected = [...allIds.keys()].filter((id) => id.startsWith(`${area.slice(0, 2)}.`)).length
+    const row = readme.match(new RegExp(`\\|\\s*\`${area}/\`\\s*\\|\\s*(\\d+)\\s*\\|`))
+    if (!row) continue // the table is optional prose; only its numbers are checked
+    if (Number(row[1]) !== expected) {
+      fail(README, `${area}: says ${row[1]} tests, the tree has ${expected}`)
     }
   }
 }

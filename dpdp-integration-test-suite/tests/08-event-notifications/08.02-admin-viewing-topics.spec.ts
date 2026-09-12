@@ -26,7 +26,7 @@ import { seedActiveTopic } from '../../utils/eventNotificationSetup'
  * pages/TopicsPage.ts's ROWS_PER_PAGE_OPTIONS.
  */
 test.describe('Admin viewing and searching Topics', () => {
-  test('08.02.01 - The Topics list renders active and deregistered rows with pagination controls', async ({
+  test('08.02.01 - The Topics list renders and paginates', async ({
     browser,
     consentAdminEventApi,
   }) => {

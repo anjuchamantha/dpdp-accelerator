@@ -157,8 +157,9 @@ async function openConsoleSession(): Promise<{ browser: Browser; request: APIReq
         )
       })
 
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
         () =>
           reject(
             new Error(
@@ -167,10 +168,17 @@ async function openConsoleSession(): Promise<{ browser: Browser; request: APIReq
             ),
           ),
         60_000,
-      ),
-    )
+      )
+    })
 
-    return { browser, request: context.request, token: await Promise.race([token, failed, timeout]) }
+    try {
+      return { browser, request: context.request, token: await Promise.race([token, failed, timeout]) }
+    } finally {
+      // A pending timer keeps Node's event loop alive, so without this the command sits idle for
+      // the rest of the 60s after the token has already arrived - measured at 64s end to end
+      // against 2s for the cached path.
+      clearTimeout(timer)
+    }
   } catch (error) {
     await browser.close()
     throw error
