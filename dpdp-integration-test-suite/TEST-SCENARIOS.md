@@ -10,7 +10,7 @@ in CI was actually checking.
 
 | | |
 |---|---|
-| **Tests** | 155 across 42 spec files in 8 areas |
+| **Tests** | 157 across 42 spec files in 8 areas |
 | **Skipped in code** | 4 — `08.08.08`, `08.10.01`, `08.10.02`, `08.10.03` |
 | **Skipped when unconfigured** | `03.02.03`, `03.07.04` (second user); `03.09.03` (expiry cron); all of `08.10` (webhook receiver) |
 | **Rules and conventions** | [`AGENTS.md`](AGENTS.md) |
@@ -271,7 +271,7 @@ Two surfaces: the Data Principal's `/complaints` and the officer's `/complaint-m
 
 **Not covered:** the list's true empty state - the shared `user` persona always has history.
 
-**42 tests, 9 spec files.**
+**44 tests, 9 spec files.**
 
 ### `07.01-data-principal-creating-complaints.spec.ts`
 

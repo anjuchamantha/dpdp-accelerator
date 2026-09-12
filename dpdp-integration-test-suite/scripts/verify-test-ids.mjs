@@ -169,6 +169,50 @@ if (catalogue) {
   for (const id of listed) {
     if (!allIds.has(id)) fail(CATALOGUE, `documents '${id}', which no longer exists`)
   }
+
+  // ── The summary totals are prose, so the ID checks above do not cover them. They are what
+  // ── actually goes stale: a test arriving in a merge updates the tables (or verify:ids would
+  // ── have caught it) while the counts above them quietly stay wrong.
+  const summary = catalogue.match(
+    /\|\s*\*\*Tests\*\*\s*\|\s*(\d+) across (\d+) spec files in (\d+) areas\s*\|/,
+  )
+  if (!summary) {
+    fail(CATALOGUE, 'has no `| **Tests** | N across M spec files in K areas |` summary row')
+  } else {
+    const [, tests, files, areaCount] = summary
+    if (Number(tests) !== allIds.size) {
+      fail(CATALOGUE, `summary says ${tests} tests, the tree has ${allIds.size}`)
+    }
+    if (Number(files) !== idsByFile.size) {
+      fail(CATALOGUE, `summary says ${files} spec files, the tree has ${idsByFile.size}`)
+    }
+    if (Number(areaCount) !== areas.length) {
+      fail(CATALOGUE, `summary says ${areaCount} areas, the tree has ${areas.length}`)
+    }
+  }
+
+  // Each area's own `**N tests, M spec files.**` line, matched to the `## \`NN-name/\`` heading
+  // it follows.
+  for (const area of areas) {
+    const expectedTests = [...allIds.keys()].filter((id) => id.startsWith(`${area.slice(0, 2)}.`)).length
+    const expectedFiles = [...idsByFile.keys()].filter((where) => where.includes(`/${area}/`)).length
+    const section = catalogue.split(new RegExp(`^## \\\`${area}/\\\``, 'm'))[1]
+    if (section === undefined) {
+      fail(CATALOGUE, `has no \`## \\\`${area}/\\\`\` section`)
+      continue
+    }
+    const counts = section.match(/\*\*(\d+) tests?, (\d+) spec files?\.\*\*/)
+    if (!counts) {
+      fail(CATALOGUE, `${area}: no \`**N tests, M spec files.**\` line`)
+      continue
+    }
+    if (Number(counts[1]) !== expectedTests) {
+      fail(CATALOGUE, `${area}: says ${counts[1]} tests, the tree has ${expectedTests}`)
+    }
+    if (Number(counts[2]) !== expectedFiles) {
+      fail(CATALOGUE, `${area}: says ${counts[2]} spec files, the tree has ${expectedFiles}`)
+    }
+  }
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────────────────────

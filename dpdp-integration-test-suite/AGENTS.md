@@ -109,11 +109,19 @@ covered, plan a change, or interpret a CI failure. It is **not** optional docume
 
 - A commit that **adds** a test adds its row.
 - A commit that **deletes** a test removes its row — and renumbers the survivors (R5).
+- A commit that **moves** a test updates both the row and every cross-reference to its old ID.
 - A commit that **changes what a test asserts** updates its Notes.
+- Any of the above updates the counts: the `| **Tests** |` summary row at the top, and the
+  `**N tests, M spec files.**` line under the area's own heading.
 - New known gaps, product bugs found, and flakiness observations go in its tail sections.
 
-`npm run verify:ids` fails if an ID in the tree has no entry there, or an entry names an ID that
-does not exist. That catches the mechanical half; the prose is on you.
+`npm run verify:ids` fails if an ID in the tree has no entry there, if an entry names an ID that
+does not exist, or if either set of counts disagrees with the tree. That catches the mechanical
+half; the prose is on you.
+
+The counts are checked because they are what actually goes stale. The tables are hard to forget —
+verify:ids rejects the commit — but the totals above them are prose, and a test arriving through a
+merge leaves them quietly wrong.
 
 ## Personas and auth
 
