@@ -508,9 +508,15 @@ jobs:
 
       - name: Verify accelerator provisioning
         run: |
-          creds="dpdp-integration-test-suite/.auth/provisioning-client.json"
-          client_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["clientId"])' "${creds}")"
-          client_secret="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["clientSecret"])' "${creds}")"
+          # Written by the bootstrap step above. It lives here rather than under .auth/ because
+          # the suite's global teardown removes that whole directory after every run.
+          creds="dpdp-integration-test-suite/e2e-config.local.json"
+          read_cred() {
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["provisioningClient"][sys.argv[2]])' \
+              "${creds}" "$1"
+          }
+          client_id="$(read_cred clientId)"
+          client_secret="$(read_cred clientSecret)"
           token="$(curl -sk -X POST "${IS_BASE_URL}/oauth2/token" \
             -u "${client_id}:${client_secret}" \
             -d grant_type=client_credentials \
