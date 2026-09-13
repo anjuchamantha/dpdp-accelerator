@@ -94,17 +94,49 @@ resolve_db_profile() {
 
 resolve_db_profile
 
-# Expands {host}/{port}/{db}/{user} in a profile template, plus {charset} when a third
-# argument is given (only the CREATE DATABASE template uses it).
+# Expands {host}/{port}/{db}/{user}/{sslmode} in a profile template, plus {charset} when a
+# third argument is given (only the CREATE DATABASE template uses it).
 expand_template() {
   local template="$1" db="$2" charset="${3-}"
   printf '%s' "${template}" \
     | sed -e "s|{host}|${DB_HOST}|g" -e "s|{port}|${DB_PORT}|g" -e "s|{db}|${db}|g" \
-          -e "s|{user}|${DB_USER}|g" -e "s|{charset}|${charset}|g"
+          -e "s|{user}|${DB_USER}|g" -e "s|{charset}|${charset}|g" \
+          -e "s|{sslmode}|${DB_SSL_MODE}|g"
 }
+
+# Defaulted rather than required, so a configure.properties written before this setting
+# existed still installs. Validated because the value goes straight into the JDBC URL:
+# a typo would otherwise surface as a driver error at server start, far from its cause.
+# Uppercased before validating, the same way DB_TYPE is, so `required` is accepted as
+# readily as `REQUIRED`.
+DB_SSL_MODE="$(printf '%s' "${DB_SSL_MODE:-PREFERRED}" | tr '[:lower:]' '[:upper:]')"
+if [ "${DB_TYPE}" != "h2" ]; then
+  case "${DB_SSL_MODE}" in
+    DISABLED|PREFERRED|REQUIRED|VERIFY_CA|VERIFY_IDENTITY) ;;
+    *)
+      printf '\nERROR: DB_SSL_MODE "%s" is not a Connector/J sslMode value.\n' "${DB_SSL_MODE}"
+      printf '       Use DISABLED, PREFERRED, REQUIRED, VERIFY_CA or VERIFY_IDENTITY\n'
+      printf '       in repository/conf/configure.properties.\n\n'
+      exit 2
+      ;;
+  esac
+fi
 
 echo "Product home: ${WSO2_IS_HOME}"
 echo "Database type: ${DB_TYPE}"
+if [ "${DB_TYPE}" != "h2" ]; then
+  echo "JDBC TLS mode: ${DB_SSL_MODE}"
+  case "${DB_SSL_MODE}" in
+    REQUIRED|VERIFY_CA|VERIFY_IDENTITY) ;;
+    *)
+      # PREFERRED and DISABLED both end in an unencrypted connection against a server
+      # with no TLS configured, and PREFERRED does it without saying so.
+      echo "      NOTE: this permits an unencrypted connection to ${DB_HOST}. Set"
+      echo "            DB_SSL_MODE=REQUIRED in repository/conf/configure.properties to"
+      echo "            require TLS (the server must be configured for it)."
+      ;;
+  esac
+fi
 echo
 
 # --------------------------------------------------------------- SQL execution
