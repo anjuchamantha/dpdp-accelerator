@@ -255,10 +255,30 @@ echo "Authenticating as the provisioning client ${PROVISIONING_CLIENT_ID}."
 
 echo "Provisioning integration-test accounts on ${IS_BASE_URL}"
 
-api -o /dev/null -f "${IS_BASE_URL}/scim2/Users?count=1" \
-  || fail "cannot reach ${IS_BASE_URL}/scim2 with the provisioning client's token. Is the server
-       running? A 403 here means the client is missing a scope - re-run
-       npm run bootstrap:provisioning-app, which re-authorizes it."
+# Reports the status rather than just failing: `count=1` makes the Identity Server walk
+# every user store to total them, so this probe fails for server-side reasons as readily
+# as for authorization ones, and the two want completely different responses. Saying
+# "missing a scope" for a 500 sends the reader after the wrong thing.
+probe_body="$(mktemp)"
+probe_status=$(api -o "${probe_body}" -w '%{http_code}' "${IS_BASE_URL}/scim2/Users?count=1" || echo 000)
+if [ "${probe_status}" != "200" ]; then
+  case "${probe_status}" in
+    401|403)
+      fail "the provisioning client's token was refused by ${IS_BASE_URL}/scim2 (HTTP ${probe_status}).
+       It is missing a scope - re-run npm run bootstrap:provisioning-app, which re-authorizes it."
+      ;;
+    000)
+      fail "cannot reach ${IS_BASE_URL}/scim2 at all. Is the server running?"
+      ;;
+    *)
+      printf '%s\n' "$(head -c 400 "${probe_body}")" >&2
+      fail "${IS_BASE_URL}/scim2 returned HTTP ${probe_status}, which is not an authorization
+       problem. Check repository/logs/wso2carbon.log - listing users totals every user
+       store, so one unreachable store fails the whole call."
+      ;;
+  esac
+fi
+rm -f "${probe_body}"
 
 provision "${USER_NAME}"   "${USER_PASSWORD}"   "${USER_ROLE}"
 provision "${USER_2_NAME}" "${USER_2_PASSWORD}" "${USER_ROLE}"
