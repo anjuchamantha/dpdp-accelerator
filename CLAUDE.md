@@ -67,8 +67,9 @@ including the release gate. Keep the restore read-only. Cache entries are immuta
 `nightly-e2e.yml` refreshes it: unless a manual run ticks `use_cached_is_pack`, it deletes the
 default branch's `is-pack-*` entry, rebuilds the pack at the latest U2 level once
 (`e2e.yml` with `pack_only`), saves it, and runs every database leg on that same pack.
-`release-builder.yml` does the same on every run, so a release is always gated on the latest U2
-level, never on whatever the cache holds.
+`release-builder.yml` does the same whenever its E2E gate runs from the default branch; from any
+other branch each database leg applies the latest U2 itself. Either way a release is gated on the
+latest U2 level, never on whatever the cache holds.
 
 Role *membership* is the one thing the accelerator never provisions, so both CI and a fresh local
 install get their accounts from `dpdp-integration-test-suite/scripts/provision-test-users.sh`

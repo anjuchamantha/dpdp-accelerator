@@ -72,7 +72,9 @@ the `IS_PACK_S3_URI` secret. The published GitHub release zip is not U2-updatabl
 the `migration-resources/` tree the update tool needs — so that path was abandoned.
 
 The gate never trusts the pack cache: it deletes the cached pack, applies the latest U2 level
-once, and then runs every database (H2, MySQL and PostgreSQL) in parallel on that same pack.
+once, and then runs every database (H2, MySQL and PostgreSQL) in parallel, normally on that same
+pack. A database job that finds no cached pack applies the latest U2 level itself, and each job
+reports the update level it tested.
 Duration is hard to pin down: one database's E2E run has historically taken 18–25 minutes, and
 the pack refresh ahead of it adds the download and `wso2update_linux`. Check a recent run's step
 timings rather than trusting a number here.
