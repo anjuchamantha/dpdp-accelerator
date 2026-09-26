@@ -38,6 +38,11 @@ test.describe('Per-run tenant creation', () => {
   test('01.01.01 - Creates a fresh tenant via the root-organization wizard, and its owner can sign into it', async ({
     browser,
   }) => {
+    // Two Console sign-ins plus tenant creation, and the first Console load on a freshly started
+    // server - far more than the 30s default. loginToConsole alone can wait ~80s per attempt;
+    // fixtures/tenant.fixtures.ts gives its longer version of this chain 240s.
+    test.setTimeout(180_000)
+
     if (!readRunState().tenant) {
       const domain = uniqueTenantDomain()
       const owner = { username: `${uniqueMarker('tenant-owner')}@dpdp.test`, password: 'TenantOwner@2026!' }
@@ -58,9 +63,6 @@ test.describe('Per-run tenant creation', () => {
         email: owner.username,
         password: owner.password,
       })
-      // Provisioning is synchronous, but the dialog's close animation and the tenant list's own
-      // refresh need a beat - see the identical wait in fixtures/tenant.fixtures.ts.
-      await adminPage.waitForTimeout(2_000)
       await adminPage.context().close()
 
       writeRunState({ tenant: { domain, owner } })

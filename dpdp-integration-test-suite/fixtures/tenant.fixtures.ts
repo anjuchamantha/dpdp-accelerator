@@ -166,11 +166,6 @@ async function createTenant(browser: Browser): Promise<CreatedTenant> {
     email: owner.username,
     password: owner.password,
   })
-  // Provisioning itself is synchronous (the accelerator's onTenantCreate
-  // finishes within the same request the dialog's own POST makes), but the dialog's close
-  // animation and the underlying list's refresh still need a beat before the context is torn
-  // down mid-flight.
-  await adminPage.waitForTimeout(2_000)
   await adminPage.context().close()
 
   // Step 2: the tenant owner logs into their OWN Console (never the super admin — `admin`

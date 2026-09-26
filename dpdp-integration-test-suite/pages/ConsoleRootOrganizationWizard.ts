@@ -41,6 +41,7 @@ export interface NewTenantFields {
  * only tenant-creation path this suite uses.
  */
 export class ConsoleRootOrganizationWizard {
+  private readonly page: Page
   readonly root: Locator
   readonly newRootOrganizationButton: Locator
   readonly domainField: Locator
@@ -51,9 +52,8 @@ export class ConsoleRootOrganizationWizard {
   readonly passwordField: Locator
   readonly createButton: Locator
 
-  // Not stored - every locator this class needs is built from it right here in the constructor;
-  // there's no navigation or later-page-access method the way pages/*ListPage.ts classes have.
   constructor(page: Page) {
+    this.page = page
     this.newRootOrganizationButton = page.getByRole('button', { name: 'New Root Organization' })
     this.root = page.getByRole('dialog').filter({ hasText: 'Create a Root Organization' })
     // Placeholders carry a typographic right single-quote ('), not an ASCII apostrophe -
@@ -78,6 +78,17 @@ export class ConsoleRootOrganizationWizard {
     await this.usernameField.fill(fields.username)
     await this.emailField.fill(fields.email)
     await this.passwordField.fill(fields.password)
+    // Returns once the dialog's own POST has answered rather than after a fixed delay. Provisioning,
+    // the accelerator's onTenantCreate included, finishes within that request, so the caller can
+    // close the context straight away.
+    const created = this.page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/server/v1/tenants') && response.request().method() === 'POST',
+    )
     await this.createButton.click()
+    const response = await created
+    if (!response.ok()) {
+      throw new Error(`Tenant creation failed: POST /api/server/v1/tenants returned ${String(response.status())}`)
+    }
   }
 }
