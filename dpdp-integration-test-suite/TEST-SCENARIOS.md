@@ -767,6 +767,10 @@ extra waiting does not help. Not reproduced or specifically diagnosed since the 
 above; it may turn out to be the same class of contention issue, or something distinct — treat it
 as open until it recurs at 2 workers.
 
+**CI fails a flaky run.** A test that fails and then passes on its retry still fails the run
+(`failOnFlakyTests` in `playwright.config.ts`); the report marks it flaky rather than failed.
+Local runs keep passing on a retry.
+
 Run with `--workers=1` to distinguish a real failure from a flake.
 
 ---

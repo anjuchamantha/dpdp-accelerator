@@ -38,6 +38,10 @@ export default defineConfig({
   // cores, so an occasional resource-contention timeout is expected - retrying absorbs that
   // without masking a deterministic failure, which still fails the same after any number of tries.
   retries: process.env.CI ? 1 : 2,
+  // CI still retries so the report tells an intermittent failure from a deterministic one, and a
+  // flaky setup test doesn't skip every project that depends on it - but a run that only passed
+  // on a retry fails.
+  failOnFlakyTests: Boolean(process.env.CI),
   reporter: [['html', { open: 'never' }]],
   globalSetup: './global-setup.ts',
   globalTeardown: './global-teardown.ts',
