@@ -1,0 +1,149 @@
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Runs the Playwright suite against an Identity Server that is already deployed, rather than one
+# this job installs. Nothing on the server is reconfigured, so the webhook-delivery tests (09.10:
+# the server can't reach a receiver on this runner) and the consent-expiry test (04.09: needs the
+# interval schedule) skip themselves.
+name: Remote E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: >-
+          Suite ref to check out. Match the accelerator release the server runs, or tests for
+          undeployed changes fail for the wrong reason.
+        required: true
+        type: string
+        default: v1.0.0-rc3
+      projects:
+        description: Space-separated Playwright projects to run. Empty runs every project.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# One server: a second run would create its tenant and sign the shared personas in alongside the
+# first, and IS allows one active session per account.
+concurrency:
+  group: remote-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: E2E against ${{ vars.REMOTE_E2E_BASE_URL }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IS_BASE_URL: ${{ vars.REMOTE_E2E_BASE_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dpdp-integration-test-suite/package-lock.json
+
+      - name: Check the server is reachable
+        run: |
+          if [ -z "${IS_BASE_URL}" ]; then
+            echo "::error::Set the REMOTE_E2E_BASE_URL repository variable, e.g. https://dpdp.example.com"
+            exit 1
+          fi
+          curl -sf -o /dev/null "${IS_BASE_URL}/oauth2/token/.well-known/openid-configuration" \
+            || { echo "::error::${IS_BASE_URL} did not serve its OIDC discovery document"; exit 1; }
+
+      - name: Install the suite's dependencies
+        working-directory: dpdp-integration-test-suite
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # The persona password must be the same on every run: provision-test-users.sh leaves an
+      # existing account untouched, so a fresh password would lock the second run out.
+      - name: Configure the suite
+        working-directory: dpdp-integration-test-suite
+        env:
+          ADMIN_USERNAME: ${{ secrets.REMOTE_E2E_ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.REMOTE_E2E_ADMIN_PASSWORD }}
+          PERSONA_PASSWORD: ${{ secrets.REMOTE_E2E_PERSONA_PASSWORD }}
+        run: |
+          for name in ADMIN_USERNAME ADMIN_PASSWORD PERSONA_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret REMOTE_E2E_${name} is not set"
+              exit 1
+            fi
+          done
+          python3 - <<'PYEOF'
+          import json, os
+
+          base_url = os.environ['IS_BASE_URL'].rstrip('/')
+          password = os.environ['PERSONA_PASSWORD']
+          config = {
+              'identityServer': {
+                  'baseUrl': base_url,
+                  'portalBaseUrl': base_url + '/consent-portal',
+                  'ignoreHttpsErrors': False,
+              },
+              'superAdmin': {
+                  'username': os.environ['ADMIN_USERNAME'],
+                  'password': os.environ['ADMIN_PASSWORD'],
+              },
+              'personas': {
+                  name: {'password': password} for name in ('user', 'user2', 'consentAdmin', 'dpo')
+              },
+          }
+          with open('e2e-config.local.json', 'w') as handle:
+              json.dump(config, handle, indent=2)
+              handle.write('\n')
+          PYEOF
+
+      # Reuses the "DPDP E2E Provisioning" application after the first run; it only creates one
+      # when none exists.
+      - name: Bootstrap the provisioning client
+        working-directory: dpdp-integration-test-suite
+        run: npm run --silent bootstrap:provisioning-app
+
+      - name: Provision test users
+        run: bash dpdp-integration-test-suite/scripts/provision-test-users.sh
+
+      - name: Run Playwright
+        working-directory: dpdp-integration-test-suite
+        env:
+          PROJECTS: ${{ inputs.projects }}
+        run: |
+          project_args=()
+          for p in ${PROJECTS}; do
+            project_args+=(--project="${p}")
+          done
+          ./run-e2e.sh --reporter=github,html "${project_args[@]}"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-remote
+          path: |
+            dpdp-integration-test-suite/playwright-report/
+            dpdp-integration-test-suite/test-results/
+          retention-days: 7
