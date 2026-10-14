@@ -119,7 +119,7 @@ test('POST /decision answers 502 when IS fails', async () => {
   });
 });
 
-test('serves the loader and the vendored library', async () => {
+test('serves the loader and the library', async () => {
   await withServer({}, async (base) => {
     const loader = await fetch(`${base}/loader.js`);
     assert.match(loader.headers.get('content-type'), /javascript/);
@@ -128,5 +128,8 @@ test('serves the loader and the vendored library', async () => {
     const vendor = await fetch(`${base}/vendor/cookieconsent.umd.js`);
     assert.equal(vendor.status, 200);
     assert.ok((await vendor.text()).includes('CookieConsent'));
+    const css = await fetch(`${base}/vendor/cookieconsent.css`);
+    assert.match(css.headers.get('content-type'), /css/);
+    assert.equal((await fetch(`${base}/vendor/cookieconsent.esm.js`)).status, 404);
   });
 });

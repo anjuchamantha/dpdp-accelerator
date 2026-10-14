@@ -4,7 +4,8 @@ Cookie banner, script blocking and consent recording for a website whose backend
 and Express. Choices are stored as DPDP consents in WSO2 Identity Server, so they appear in the
 DPDP consent portal, keep their history, expire and raise Event Notifications like any other
 consent. The banner is [vanilla-cookieconsent](https://github.com/orestbida/cookieconsent) 3.1.0
-(MIT), served by this package.
+(MIT), an exact-version dependency that your backend serves at `/cookie-consent/vendor/*`, so
+visitors' browsers never fetch it from a third-party CDN.
 
 ## How it works
 

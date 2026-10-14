@@ -25,7 +25,9 @@ const { readSubjectCookie, writeSubjectCookie } = require('./subjectCookie');
 const { StaleRevisionError } = require('./cookieConsentService');
 
 const BROWSER_DIR = path.join(__dirname, '..', 'browser');
-const VENDOR_DIR = path.join(__dirname, '..', 'vendor', 'vanilla-cookieconsent', '3.1.0');
+const LIBRARY_DIST = path.join(path.dirname(require.resolve('vanilla-cookieconsent/package.json')), 'dist');
+// Only what the loader requests: the package's other builds are not part of the public surface.
+const LIBRARY_FILES = ['cookieconsent.umd.js', 'cookieconsent.css'];
 
 function loaderSource() {
   return ['loader-core.js', 'loader.js']
@@ -83,7 +85,11 @@ function createRouter({ service, cookieSecret, cookieOptions, getUsername, onErr
     res.type('application/javascript').set('Cache-Control', 'no-cache').send(loader);
   });
 
-  router.use('/vendor', express.static(VENDOR_DIR, { maxAge: '1d', fallthrough: false }));
+  for (const file of LIBRARY_FILES) {
+    router.get(`/vendor/${file}`, (req, res) => {
+      res.sendFile(path.join(LIBRARY_DIST, file), { maxAge: '1d' });
+    });
+  }
 
   return router;
 }
