@@ -6,70 +6,15 @@ Server. The Node SDK (`../node`) is the reference implementation.
 
 ## Browser API
 
-The site mounts the SDK under one base path, `/cookie-consent` in the examples. The loader finds
-the base path from its own script URL, so any path works. All responses carry
-`Cache-Control: no-store` unless stated.
+[`cookie-consent.yaml`](cookie-consent.yaml) (OpenAPI 3.0.3) describes every operation the SDK
+serves to the loader: `GET /state`, `POST /decision`, `GET /loader.js` and the two
+`/vendor/*` files, with their request and response bodies, status codes and caching. An SDK in a
+language with an OpenAPI generator can generate its request and response types from it.
 
-### `GET /state`
-
-The visitor's current state. `200` with:
-
-```json
-{
-  "revision": 1234567,
-  "hasDecision": true,
-  "categories": { "analytics": true, "marketing": false },
-  "config": {
-    "texts": { "bannerTitle": "…", "…": "…" },
-    "categories": [
-      {
-        "key": "analytics",
-        "title": "Analytics cookies",
-        "description": "…",
-        "cookies": [{ "name": "_ga", "description": "…" }]
-      }
-    ]
-  }
-}
-```
-
-- `revision`: a non-negative 31-bit integer that changes whenever any category's Purpose gets a
-  new version. The banner library requires a number.
-- `hasDecision`: `true` only when every configured category has a decision.
-- `categories`: one boolean per category that has a decision; undecided categories are left out.
-- `config.texts`: the twelve strings the loader reads, listed in `../node/src/defaultTexts.js`.
-- `config.categories`: in display order. `cookies` are the Purpose's Elements.
-
-`502` with `{"error": "…"}` when Identity Server cannot be reached. The loader then shows no
-banner and keeps optional scripts blocked.
-
-### `POST /decision`
-
-Body, at most 4 KB:
-
-```json
-{ "revision": 1234567, "categories": { "analytics": true, "marketing": false } }
-```
-
-| Status | When | Body |
-|---|---|---|
-| `200` | Saved | The new state, same shape as `GET /state` |
-| `400` | `revision` is not an integer, or `categories` is not an object of booleans | `{"error": "…"}` |
-| `409` | `revision` is not the current one | `{"error": "…"}`; the loader drops the choice and reloads |
-| `502` | Identity Server failed | `{"error": "…"}`; the loader keeps the choice and sends it again on the next page load |
-
-Keys that are not configured categories are ignored. A category left out is not changed.
-
-### `GET /loader.js`
-
-`../browser/loader-core.js` followed by `../browser/loader.js`, joined with a newline, as
-`application/javascript` with `Cache-Control: no-cache`.
-
-### `GET /vendor/cookieconsent.umd.js`, `GET /vendor/cookieconsent.css`
-
-The same files from vanilla-cookieconsent **3.1.0** (`dist/`), cacheable for a day. The loader
-reads the library's own preferences cookie, whose format is specific to this version, so every
-SDK pins exactly 3.1.0.
+The site mounts the SDK under one base path, `/cookie-consent` in the examples; the loader finds
+it from its own script URL, so any path works. The vendor files are vanilla-cookieconsent
+**3.1.0** exactly: the loader reads the library's own preferences cookie, whose format is specific
+to that version.
 
 ## Visitor cookie
 
