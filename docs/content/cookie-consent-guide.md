@@ -24,6 +24,9 @@ This is a preview: Node.js/Express backends only, English banner text, cookies l
   so each `consent.revoke` event at login is this move, not a withdrawal by the person.
 - A user can change cookie choices on the website (**Cookie preferences**) or revoke them in the
   Consent Portal. The website applies a revocation on the next page load.
+- The website's backend reads the person's cookie consents from Identity Server on each page
+  load, and writes only when a choice changes or the person logs in. The SDK README lists every
+  call for each case ("Calls to Identity Server").
 
 ## Set up
 

@@ -80,6 +80,37 @@ Optional settings: `secureCookies` (default `true`), `expiryDays` (365), `texts`
 - A revocation in the consent portal takes effect on the next page load.
 - A choice that could not be saved is kept in the browser and sent again on the next page load; until then the browser applies it.
 
+## Calls to Identity Server
+
+The browser calls only your backend: on every page `GET /cookie-consent/state`, and on a choice
+`POST /cookie-consent/decision`. Your backend then calls IS Consent Management v2.0
+(`/api/identity/consent-mgt/v2.0`). `onApiCall` receives each of these IS calls; the token call is
+not reported.
+
+Shared by all visitors:
+
+- **Token:** `POST /oauth2/token` (client credentials), reused until 30 seconds before it expires.
+- **Cookie categories:** loaded on the first request and checked again at most every 5 minutes.
+  The first load costs two calls per category, `GET /purposes?filter=name eq "<purposeName>"`
+  then `GET /purposes/{id}` (the search result has no Elements). Later checks cost one,
+  `GET /purposes/{id}` with the remembered ID, and fall back to the name search if that Purpose
+  is gone or renamed. Requests that arrive during a load wait for it instead of loading again.
+
+Per visitor, after the categories are loaded:
+
+| Scenario | Calls | Why |
+|---|---|---|
+| Page load, no decision yet (no `dpdp_cc` cookie) | none | There is no subject to look up. |
+| Page load, any other visitor or a logged-in user | `GET /consents?userId=<subject>&relation=SUBJECT&filter=properties.consentType eq cookie` | IS holds the decision, so a revocation in the portal, a choice on another device, an expiry or a new Purpose version reaches the page. |
+| First choice by a new visitor (banner) | `POST /consents` per category | One consent per category, so each can be withdrawn on its own: `ACTIVE` if accepted, `REJECTED` if declined. |
+| Any other choice, including a logged-in user's | `GET /consents?…`, then per changed category: accepting is `POST /consents`; declining an accepted category is `POST /consents/{id}/revoke`; declining an undecided one is `POST /consents` (`REJECTED`) | The read gives the current decision and the consent IDs to revoke. Unchanged categories cost nothing, and the result is not read back. |
+| Login (`linkOnLogin`) | `GET /consents?…` for the visitor and the user (in parallel); per category where the visitor's choice is newer, the same writes as a choice, made for the user (`POST /consents` with `linkedFrom`, plus a revoke when it replaces an accepted user consent); then `POST /consents/{id}/revoke` for each accepted visitor consent | IS cannot move a consent to another subject, so the choice is copied to the user, and the visitor's copies are revoked so nothing unused stays `ACTIVE`. If a copy fails, nothing is revoked and the next login tries again. |
+| Login with no cookie, or on a browser linked to another user | none | Nothing to copy; the cookie is linked to the user. |
+
+With `subjectQuery: 'property'` the list filters on `properties.subjectRef` instead of `userId`.
+For example, with two categories, "Accept all" by a new visitor costs 2 calls, and logging in
+after it costs 6: 2 reads, 2 copies and 2 revokes.
+
 ## Develop
 
 ```sh
