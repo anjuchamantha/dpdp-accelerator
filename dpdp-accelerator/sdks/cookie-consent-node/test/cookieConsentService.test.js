@@ -37,7 +37,8 @@ function fakeIs() {
   const is = { records: [] };
   let clock = 1000;
   let nextId = 1;
-  is.listCookieConsents = async (subject, serviceId) => is.records
+  is.lists = 0;
+  is.listCookieConsents = async (subject, serviceId) => (is.lists++, is.records)
     .filter((r) => r.subjectId === subject && r.serviceId === serviceId)
     .map((r) => ({ ...r }));
   is.createConsent = async (body) => {
@@ -113,6 +114,37 @@ test('saving the same decision twice creates nothing new', async () => {
   const first = await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
   await service.saveDecision({ username: null, cookie: first.cookie, categories: ACCEPT_ANALYTICS, revision: 42 });
   assert.equal(is.records.length, 2);
+});
+
+test('a first decision is not read back from Identity Server', async () => {
+  const { is, service } = setup();
+  await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
+  assert.equal(is.lists, 0);
+});
+
+test('a change reads the current consents once and returns the new state without reading back', async () => {
+  const { is, service } = setup();
+  const first = await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
+  const second = await service.saveDecision({ username: null, cookie: first.cookie, categories: { analytics: false }, revision: 42 });
+  assert.equal(is.lists, 1);
+  assert.deepEqual(second.state.categories, { analytics: false, marketing: false });
+  assert.equal(second.state.hasDecision, true);
+  assert.equal(second.state.revision, 42);
+  assert.ok(second.state.config.categories.length === 2);
+});
+
+test('a decision on some categories leaves the others undecided', async () => {
+  const { service } = setup();
+  const { state } = await service.saveDecision({ username: null, cookie: null, categories: { analytics: true, unknown: true }, revision: 42 });
+  assert.deepEqual(state.categories, { analytics: true });
+  assert.equal(state.hasDecision, false);
+});
+
+test('the returned state matches what a fresh read of Identity Server gives', async () => {
+  const { service } = setup();
+  const first = await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
+  const second = await service.saveDecision({ username: null, cookie: first.cookie, categories: { marketing: true }, revision: 42 });
+  assert.deepEqual(second.state, await service.getState({ username: null, cookie: second.cookie }));
 });
 
 test('withdrawing analytics revokes its consent', async () => {

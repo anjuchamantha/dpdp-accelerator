@@ -109,6 +109,20 @@ test('returns null when no purpose has that name', async () => {
   assert.equal(await c.findPurposeByName('missing'), null);
 });
 
+test('gets a purpose by id, or null when Identity Server no longer has it', async () => {
+  const { c, calls } = client(async (url) => (url.endsWith('/purposes/p1')
+    ? response(200, { id: 'p1', name: 'cookie_analytics', type: 'Cookie' })
+    : response(404, { code: 'CM-60001' })));
+  assert.equal((await c.getPurpose('p1')).name, 'cookie_analytics');
+  assert.equal(calls.length, 2);
+  assert.equal(await c.getPurpose('gone'), null);
+});
+
+test('getPurpose still throws on errors other than not found', async () => {
+  const { c } = client(async () => response(500, {}));
+  await assert.rejects(c.getPurpose('p1'), IsApiError);
+});
+
 test('creates and revokes consents and reports each call', async () => {
   const { c, calls, logged } = client(async (url, options) => (options.method === 'POST' && url.endsWith('/consents')
     ? response(201, { id: 'c9' })

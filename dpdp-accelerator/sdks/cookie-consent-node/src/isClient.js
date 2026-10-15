@@ -108,6 +108,16 @@ function createIsClient({
       return call('GET', `/purposes/${encodeURIComponent(summary.id)}`);
     },
 
+    /** The purpose's detail, or null when Identity Server has no purpose with that id. */
+    async getPurpose(id) {
+      try {
+        return await call('GET', `/purposes/${encodeURIComponent(id)}`);
+      } catch (e) {
+        if (e instanceof IsApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+
     async listCookieConsents(subjectId, serviceId) {
       const query = new URLSearchParams({ serviceId, attributes: 'purposes,properties', limit: String(LIST_LIMIT) });
       if (subjectQuery === 'property') {

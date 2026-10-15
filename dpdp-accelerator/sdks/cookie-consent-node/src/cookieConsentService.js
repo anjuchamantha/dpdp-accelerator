@@ -19,7 +19,7 @@
 'use strict';
 
 const { newVisitorId: defaultNewVisitorId } = require('./subjectCookie');
-const { resolveState, planChanges, decisionsToLink, decisionConsentIds } = require('./consentState');
+const { resolveState, resolveAfter, planChanges, decisionsToLink, decisionConsentIds } = require('./consentState');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,9 +50,13 @@ function createCookieConsentService({
     return isClient.listCookieConsents(subject, serviceId);
   }
 
+  function withConfig(state, currentCatalog) {
+    return { ...state, config: bannerConfig(currentCatalog, texts) };
+  }
+
   async function stateFor(subject, currentCatalog) {
     const records = subject ? await listFor(subject) : [];
-    return { ...resolveState(records, currentCatalog), config: bannerConfig(currentCatalog, texts) };
+    return withConfig(resolveState(records, currentCatalog), currentCatalog);
   }
 
   async function execute(subject, ops, currentCatalog, extraProperties = {}) {
@@ -101,7 +105,9 @@ function createCookieConsentService({
       const subject = username || nextCookie.v;
       const records = isNewVisitor ? [] : await listFor(subject);
       await execute(subject, planChanges(records, currentCatalog, categories), currentCatalog);
-      return { cookie: nextCookie, state: await stateFor(subject, currentCatalog) };
+      // Every write succeeded (a failure throws), so the new state follows from the records read
+      // above and the decision; reading it back from Identity Server would cost a call per save.
+      return { cookie: nextCookie, state: withConfig(resolveAfter(records, currentCatalog, categories), currentCatalog) };
     },
 
     async linkOnLogin({ username, cookie }) {

@@ -72,7 +72,9 @@ Optional settings: `secureCookies` (default `true`), `expiryDays` (365), `texts`
 ## Behaviour to know
 
 - If the backend or IS is unreachable, no banner is shown and optional scripts stay blocked.
-- A new Purpose version shows the banner again.
+- A new Purpose version shows the banner again. The backend checks for one at most every 5
+  minutes: categories are configured by Purpose name, which is the same in every environment, and
+  each Purpose's ID is remembered after the first lookup so later checks cost one call per category.
 - After logout the browser keeps applying the user's choices; a change made while logged out is
   saved for the browser only and merged at the next login (most recent choice wins).
 - A revocation in the consent portal takes effect on the next page load.

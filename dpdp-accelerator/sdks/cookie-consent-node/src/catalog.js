@@ -55,22 +55,42 @@ function toCategory(definition, purpose) {
 function createCatalog({ isClient, categories, ttlMs = DEFAULT_TTL_MS, now = Date.now }) {
   let cached = null;
   let loadedAt = 0;
+  let loading = null;
+  // Purpose ids found by name on an earlier load. A purpose keeps its id across versions, so a
+  // reload costs one call per category instead of two; the name is checked on every load, and a
+  // purpose deleted and recreated under the same name is found by name again.
+  const knownIds = new Map();
+
+  async function resolve(definition) {
+    const knownId = knownIds.get(definition.key);
+    const byId = knownId ? await isClient.getPurpose(knownId) : null;
+    const purpose = byId && byId.name === definition.purposeName
+      ? byId
+      : await isClient.findPurposeByName(definition.purposeName);
+    const category = toCategory(definition, purpose);
+    knownIds.set(definition.key, category.purposeId);
+    return category;
+  }
 
   async function load() {
-    const loaded = [];
-    for (const definition of categories) {
-      loaded.push(toCategory(definition, await isClient.findPurposeByName(definition.purposeName)));
-    }
+    const loaded = await Promise.all(categories.map(resolve));
     return { categories: loaded, revision: revisionOf(loaded) };
   }
 
   return {
     async get() {
-      if (!cached || now() - loadedAt >= ttlMs) {
-        cached = await load();
-        loadedAt = now();
+      if (cached && now() - loadedAt < ttlMs) return cached;
+      // Requests that arrive while the catalog loads wait for that load instead of starting their own.
+      if (!loading) {
+        loading = load()
+          .then((loaded) => {
+            cached = loaded;
+            loadedAt = now();
+            return loaded;
+          })
+          .finally(() => { loading = null; });
       }
-      return cached;
+      return loading;
     },
   };
 }

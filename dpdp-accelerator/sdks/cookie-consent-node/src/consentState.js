@@ -48,6 +48,16 @@ function resolveState(records, catalog) {
   return { revision: catalog.revision, hasDecision, categories };
 }
 
+/** The state once planChanges(records, catalog, desired) has been carried out. */
+function resolveAfter(records, catalog, desired) {
+  const state = resolveState(records, catalog);
+  for (const category of catalog.categories) {
+    if (typeof desired[category.key] === 'boolean') state.categories[category.key] = desired[category.key];
+  }
+  state.hasDecision = catalog.categories.every((c) => typeof state.categories[c.key] === 'boolean');
+  return state;
+}
+
 /**
  * Declining an accepted category is a revoke; declining an undecided one is a REJECTED consent,
  * so a refusal is on record too. Every ACTIVE consent of a changed category is revoked, older
@@ -92,4 +102,4 @@ function decisionConsentIds(records, catalog) {
   return ids;
 }
 
-module.exports = { resolveState, planChanges, decisionsToLink, decisionConsentIds };
+module.exports = { resolveState, resolveAfter, planChanges, decisionsToLink, decisionConsentIds };
