@@ -20,15 +20,30 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const core = require('../browser/loader-core');
-const DEFAULT_TEXTS = require('../src/defaultTexts');
+const core = require('../loader-core');
+
+// Every text the loader reads from state.config.texts; each SDK supplies its own defaults.
+const TEXTS = {
+  bannerTitle: 'We use cookies',
+  bannerDescription: 'Optional cookies need your permission.',
+  acceptAll: 'Accept all',
+  rejectAll: 'Reject all',
+  managePreferences: 'Manage preferences',
+  preferencesTitle: 'Cookie preferences',
+  savePreferences: 'Save preferences',
+  close: 'Close',
+  necessaryTitle: 'Strictly necessary cookies',
+  necessaryDescription: 'Always on.',
+  cookieName: 'Cookie',
+  cookieDescription: 'Purpose',
+};
 
 const STATE = {
   revision: 42,
   hasDecision: true,
   categories: { analytics: true, marketing: false },
   config: {
-    texts: DEFAULT_TEXTS,
+    texts: TEXTS,
     categories: [
       { key: 'analytics', title: 'Analytics cookies', description: 'Counts visits.', cookies: [{ name: '_demo_analytics', description: 'Counts page views.' }] },
       { key: 'marketing', title: 'Marketing cookies', description: 'Offers.', cookies: [] },

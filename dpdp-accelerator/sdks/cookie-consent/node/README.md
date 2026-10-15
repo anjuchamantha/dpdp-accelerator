@@ -67,7 +67,7 @@ the loader's script tag. It shows once a choice exists and uses the banner's the
 
 Optional settings: `secureCookies` (default `true`), `expiryDays` (365), `texts` (see
 `src/defaultTexts.js`), `fetch`, `onApiCall`, `onError`, `subjectQuery` (`'userId'` or
-`'property'`, see `scripts/verify-is-api.mjs`).
+`'property'`, see `../spec/verify-is-api.mjs`).
 
 ## Behaviour to know
 
@@ -116,8 +116,11 @@ after it costs 6: 2 reads, 2 copies and 2 revokes.
 ```sh
 npm install
 npm test
-npm run verify:is   # live IS check, see scripts/verify-is-api.mjs
+npm run verify:is   # live IS check, see ../spec/verify-is-api.mjs
 npm pack            # wso2-dpdp-cookie-consent-<version>.tgz
 ```
+
+The browser loader is shared with other SDKs and lives in `../browser` (its tests: `npm test` there).
+The router serves it from there; `npm pack` copies it into the package.
 
 After re-packing, reinstall the tarball in any app that depends on it (`npm install ./vendor/<tarball>`), because the app's lockfile pins the tarball's checksum.

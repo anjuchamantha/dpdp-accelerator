@@ -15,7 +15,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "verify:is": "node scripts/verify-is-api.mjs"
+    "prepack": "node -e \"require('fs').cpSync('../browser', 'browser', { recursive: true, filter: (f) => !/[\\\\/](test|package\\.json)$/.test(f) })\"",
+    "postpack": "node -e \"require('fs').rmSync('browser', { recursive: true, force: true })\"",
+    "verify:is": "node ../spec/verify-is-api.mjs"
   },
   "peerDependencies": {
     "express": "^4.18.0"

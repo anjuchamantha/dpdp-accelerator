@@ -38,7 +38,7 @@ class IsApiError extends Error {
 
 /**
  * subjectQuery 'property' filters on the subjectRef property instead of IS's userId filter, for
- * an IS where userId does not match subjects that are not IS users (scripts/verify-is-api.mjs).
+ * an IS where userId does not match subjects that are not IS users (spec/verify-is-api.mjs).
  */
 function createIsClient({
   baseUrl, clientId, clientSecret, fetch = globalThis.fetch, onApiCall = () => {}, now = Date.now, subjectQuery = 'userId',

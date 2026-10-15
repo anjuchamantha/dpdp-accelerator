@@ -38,7 +38,7 @@ This is a preview: Node.js/Express backends only, English banner text, cookies l
    `internal_consent_mgt_consent_view`, `internal_consent_mgt_consent_update`). These scopes cover
    every consent in the organization, so keep the credentials on the server.
 3. Add the SDK to your backend and pages. See
-   `dpdp-accelerator/sdks/cookie-consent-node/README.md` in the accelerator repository.
+   `dpdp-accelerator/sdks/cookie-consent/node/README.md` in the accelerator repository.
 
 ## What users see in the Consent Portal
 

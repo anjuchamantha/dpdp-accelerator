@@ -24,7 +24,10 @@ const express = require('express');
 const { readSubjectCookie, writeSubjectCookie } = require('./subjectCookie');
 const { StaleRevisionError } = require('./cookieConsentService');
 
-const BROWSER_DIR = path.join(__dirname, '..', 'browser');
+// The loader is shared by every cookie consent SDK, so it lives beside this one in the repository;
+// prepack copies it into the package, where it is found first.
+const BROWSER_DIR = [path.join(__dirname, '..', 'browser'), path.join(__dirname, '..', '..', 'browser')]
+  .find((dir) => fs.existsSync(path.join(dir, 'loader.js')));
 const LIBRARY_DIST = path.join(path.dirname(require.resolve('vanilla-cookieconsent/package.json')), 'dist');
 // Only what the loader requests: the package's other builds are not part of the public surface.
 const LIBRARY_FILES = ['cookieconsent.umd.js', 'cookieconsent.css'];

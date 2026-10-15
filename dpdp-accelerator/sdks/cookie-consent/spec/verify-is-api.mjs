@@ -18,7 +18,7 @@
 
 // Checks, against a live IS, the consent-mgt v2 behaviour the cookie consent SDK relies on.
 // Usage: IS_BASE_URL=https://localhost:9443 COOKIE_CONSENT_CLIENT_ID=... COOKIE_CONSENT_CLIENT_SECRET=... \
-//        NODE_TLS_REJECT_UNAUTHORIZED=0 node scripts/verify-is-api.mjs
+//        NODE_TLS_REJECT_UNAUTHORIZED=0 node spec/verify-is-api.mjs
 import { randomUUID } from 'node:crypto';
 
 const base = (process.env.IS_BASE_URL || 'https://localhost:9443').replace(/\/+$/, '');
