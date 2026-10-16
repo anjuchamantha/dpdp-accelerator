@@ -1,16 +1,16 @@
 ---
-title: Cookie Consent (Preview)
+title: Cookie Consent
 sidebar_position: 6
 ---
 
-# Cookie Consent (Preview)
+# Cookie Consent
 
 Record website cookie choices as DPDP consents. A cookie banner on your site sends each choice to
 your backend, which saves it in WSO2 Identity Server through the cookie consent SDK. Cookie
 consents then appear in the Consent Portal next to your application consents, with the same
 history, expiry and Event Notifications.
 
-This is a preview: Node.js/Express backends only, English banner text, cookies listed by hand.
+Supported today: Node.js/Express backends, English banner text, cookies listed by hand.
 
 ## How it works
 
@@ -45,7 +45,7 @@ This is a preview: Node.js/Express backends only, English banner text, cookies l
 Cookie consents are listed in **My Consents** like any other consent, one per cookie category
 (for example `cookie_analytics`). Users revoke them from the consent's detail page.
 
-## Limits of the preview
+## Current limits
 
 - Static sites with no server code are not supported.
 - If your backend cannot reach Identity Server, the banner is not shown and optional scripts stay

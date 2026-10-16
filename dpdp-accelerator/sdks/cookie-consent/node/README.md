@@ -1,4 +1,4 @@
-# @wso2-dpdp/cookie-consent (preview)
+# @wso2-dpdp/cookie-consent
 
 Cookie banner, script blocking and consent recording for a website whose backend runs Node.js
 and Express. Choices are stored as DPDP consents in WSO2 Identity Server, so they appear in the

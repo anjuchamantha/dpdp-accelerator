@@ -1,4 +1,4 @@
-# Cookie consent (preview)
+# Cookie consent
 
 Cookie banners whose choices are stored as DPDP consents in WSO2 Identity Server. A website's own
 backend runs an SDK; the browser talks only to that backend, and the backend calls IS with the
