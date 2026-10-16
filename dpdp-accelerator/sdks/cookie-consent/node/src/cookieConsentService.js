@@ -20,6 +20,7 @@
 
 const crypto = require('crypto');
 const { newVisitorId: defaultNewVisitorId } = require('./subjectCookie');
+const { IsApiError } = require('./isClient');
 const { resolveState, resolveAfter, planChanges, decisionsToLink, decisionConsentIds } = require('./consentState');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -88,6 +89,41 @@ function createCookieConsentService({
     return present(subject, resolveState(records, currentCatalog), currentCatalog);
   }
 
+  function propertiesFor(subject, category, extra) {
+    return {
+      consentType: 'cookie', category: category.key, siteName, subjectRef: subject, decidedAt: String(now()), ...extra,
+    };
+  }
+
+  function create(subject, category, state, extra) {
+    return isClient.createConsent({
+      subjectId: subject,
+      serviceId,
+      language,
+      purposes: [{ id: category.purposeId, elements: category.elements.map((e) => ({ id: e.id })) }],
+      state,
+      expiryTime: now() + expiryDays * DAY_MS,
+      properties: propertiesFor(subject, category, extra),
+    });
+  }
+
+  // The subject's own approval turns a revoked, rejected or expired consent ACTIVE again, with a
+  // fresh expiry. PATCH replaces the whole property map, so every property is sent again.
+  async function reactivate(subject, category, consentId, extra) {
+    try {
+      await isClient.updateConsent(consentId, {
+        authorizations: [{ userId: subject, type: 'USER', state: 'APPROVED' }],
+        expiryTime: now() + expiryDays * DAY_MS,
+        properties: propertiesFor(subject, category, extra),
+      });
+    } catch (e) {
+      // A consent IS will not reactivate is replaced by a new one; an outage is not.
+      if (!(e instanceof IsApiError) || e.status < 400 || e.status >= 500 || e.status === 401 || e.status === 403) throw e;
+      onError(e);
+      await create(subject, category, 'ACTIVE', extra);
+    }
+  }
+
   async function execute(subject, ops, currentCatalog, extraProperties = {}) {
     for (const op of ops) {
       if (op.op === 'revoke') {
@@ -95,17 +131,9 @@ function createCookieConsentService({
         continue;
       }
       const category = currentCatalog.categories.find((c) => c.key === op.category);
-      await isClient.createConsent({
-        subjectId: subject,
-        serviceId,
-        language,
-        purposes: [{ id: category.purposeId, elements: category.elements.map((e) => ({ id: e.id })) }],
-        state: op.state,
-        expiryTime: now() + expiryDays * DAY_MS,
-        properties: {
-          consentType: 'cookie', category: category.key, siteName, subjectRef: subject, ...extraProperties[category.key],
-        },
-      });
+      const extra = extraProperties[category.key];
+      if (op.op === 'reactivate') await reactivate(subject, category, op.consentId, extra);
+      else await create(subject, category, op.state, extra);
     }
   }
 

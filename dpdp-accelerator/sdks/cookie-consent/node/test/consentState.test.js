@@ -75,9 +75,28 @@ test('withdrawing an accepted category is a revoke only', () => {
   assert.deepEqual(planChanges(records, CATALOG, { analytics: false }), [{ op: 'revoke', category: 'analytics', consentId: 'c1' }]);
 });
 
-test('accepting a rejected category creates an ACTIVE consent', () => {
-  const records = [rec('c2', 'p-m', 'pv-m1', 'REJECTED', 2)];
-  assert.deepEqual(planChanges(records, CATALOG, { marketing: true }), [{ op: 'create', category: 'marketing', state: 'ACTIVE' }]);
+test('accepting a rejected, revoked or expired category reactivates its consent', () => {
+  for (const state of ['REJECTED', 'REVOKED', 'EXPIRED']) {
+    const records = [rec('c2', 'p-m', 'pv-m1', state, 2)];
+    assert.deepEqual(planChanges(records, CATALOG, { marketing: true }), [{ op: 'reactivate', category: 'marketing', consentId: 'c2' }], state);
+  }
+});
+
+test('reactivates the latest consent of the current version, never one of an older version', () => {
+  const records = [rec('c1', 'p-a', 'pv-a2', 'REVOKED', 1), rec('c2', 'p-a', 'pv-a2', 'REJECTED', 3), rec('c3', 'p-a', 'pv-a1', 'REVOKED', 5)];
+  assert.deepEqual(planChanges(records, CATALOG, { analytics: true }), [{ op: 'reactivate', category: 'analytics', consentId: 'c2' }]);
+  assert.deepEqual(planChanges([rec('c3', 'p-a', 'pv-a1', 'REVOKED', 5)], CATALOG, { analytics: true }), [
+    { op: 'create', category: 'analytics', state: 'ACTIVE' },
+  ]);
+});
+
+test('a reused consent is decided at its decidedAt or authorization time, not its creation', () => {
+  const reused = { ...rec('c1', 'p-a', 'pv-a2', 'ACTIVE', 1), properties: { decidedAt: '50' } };
+  const newer = rec('c2', 'p-a', 'pv-a2', 'REVOKED', 10);
+  assert.deepEqual(resolveState([newer, reused], CATALOG).categories, { analytics: true });
+  const approved = { ...rec('c3', 'p-a', 'pv-a2', 'ACTIVE', 1), authorizations: [{ userId: 'v-1', state: 'APPROVED', updatedTime: 60 }] };
+  assert.deepEqual(resolveState([newer, approved], CATALOG).categories, { analytics: true });
+  assert.deepEqual(decisionsToLink([approved], [newer], CATALOG), { analytics: true });
 });
 
 test('re-consenting to a new purpose version revokes the old ACTIVE consent first', () => {

@@ -26,16 +26,24 @@ it.
 
 ## Consents in Identity Server
 
-One consent per category per subject, created through Consent Management v2.0 with:
+One consent per category per subject and Purpose version, created through Consent Management
+v2.0 with:
 
 - `subjectId`: the subject; `serviceId`: the site's M2M client ID; `language`: `en`.
 - `purposes`: the category's Purpose (latest version) with all its Elements.
 - `state`: `ACTIVE` when accepted, `REJECTED` when declined and undecided before.
 - `expiryTime`: now plus the configured expiry, in epoch milliseconds.
 - `properties`: `consentType` = `cookie`, `category` = the category key, `siteName`, `subjectRef` =
-  the subject, and on a copy made at login `linkedFrom` = the visitor consent's ID.
+  the subject, `decidedAt` = the decision time in epoch milliseconds, and on a copy made at login
+  `linkedFrom` = the visitor consent's ID.
 
-Declining an accepted category revokes every `ACTIVE` consent of that category. The rules for
+Declining an accepted category revokes every `ACTIVE` consent of that category. Accepting a
+category whose consent for the current Purpose version is `REJECTED`, `REVOKED` or `EXPIRED`
+reactivates that consent instead of creating another: one `PATCH /consents/{id}` sets an
+`APPROVED` authorization for the subject, a new `expiryTime` and the full property map (PATCH
+replaces it). The consent keeps its creation `timestamp`, so the current decision is the record
+with the latest `decidedAt`, authorization `updatedTime` or `timestamp`. If IS refuses the PATCH
+with a client error, a new consent is created instead. The rules for
 reading the current decision, saving a change and linking at login are in
 `../node/src/consentState.js` and `../node/src/cookieConsentService.js`; the calls they make are
 listed in the Node README ("Calls to Identity Server").

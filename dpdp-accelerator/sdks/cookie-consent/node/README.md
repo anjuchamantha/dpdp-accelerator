@@ -12,7 +12,7 @@ visitors' browsers never fetch it from a third-party CDN.
 The browser talks only to your backend. Your backend calls IS Consent Management v2.0 with your
 site's own M2M application. Each cookie category is an IS Purpose of type `Cookie`, each cookie an
 Element named after the browser cookie. One consent is kept per category per person: `ACTIVE` when
-accepted, `REJECTED` or `REVOKED` when declined. A first-party HttpOnly cookie, `dpdp_cc`, holds an
+accepted, `REJECTED` or `REVOKED` when declined, and made `ACTIVE` again when accepted again. A first-party HttpOnly cookie, `dpdp_cc`, holds an
 encrypted visitor ID. When the visitor logs in, `linkOnLogin` copies their choices onto their user (property
 `linkedFrom` names the visitor consent) and revokes the visitor's accepted consents.
 
@@ -106,8 +106,8 @@ Per visitor, after the categories are loaded:
 | Page load, no decision yet (no `dpdp_cc` cookie) | none | There is no subject to look up. |
 | Page load, any other visitor or a logged-in user | `GET /consents?userId=<subject>&relation=SUBJECT&filter=properties.consentType eq cookie`, one call per 100 consents (IS lists oldest first, so every page is read) | IS holds the decision, so a revocation in the portal, a choice on another device, an expiry or a new Purpose version reaches the page. |
 | First choice by a new visitor (banner) | `POST /consents` per category | One consent per category, so each can be withdrawn on its own: `ACTIVE` if accepted, `REJECTED` if declined. |
-| Any other choice, including a logged-in user's | `GET /consents?…`, then per changed category: accepting is `POST /consents`; declining an accepted category is `POST /consents/{id}/revoke`; declining an undecided one is `POST /consents` (`REJECTED`) | The read gives the current decision and the consent IDs to revoke. Unchanged categories cost nothing, and the result is not read back. |
-| Login (`linkOnLogin`) | `GET /consents?…` for the visitor and the user (in parallel); per category where the visitor's choice is newer, the same writes as a choice, made for the user (`POST /consents` with `linkedFrom`, plus a revoke when it replaces an accepted user consent); then `POST /consents/{id}/revoke` for each accepted visitor consent | IS cannot move a consent to another subject, so the choice is copied to the user, and the visitor's copies are revoked so nothing unused stays `ACTIVE`. If a copy fails, nothing is revoked and the next login tries again. |
+| Any other choice, including a logged-in user's | `GET /consents?…`, then per changed category: accepting is `PATCH /consents/{id}` when the category already has a consent for the current Purpose version (its own approval makes it `ACTIVE` again, with a fresh expiry), otherwise `POST /consents`; declining an accepted category is `POST /consents/{id}/revoke`; declining an undecided one is `POST /consents` (`REJECTED`) | The read gives the current decision and the consent IDs to revoke. Unchanged categories cost nothing, and the result is not read back. |
+| Login (`linkOnLogin`) | `GET /consents?…` for the visitor and the user (in parallel); per category where the visitor's choice is newer, the same writes as a choice, made for the user (`PATCH` or `POST /consents` with `linkedFrom`, plus a revoke when it replaces an accepted user consent); then `POST /consents/{id}/revoke` for each accepted visitor consent | IS cannot move a consent to another subject, so the choice is copied to the user, and the visitor's copies are revoked so nothing unused stays `ACTIVE`. If a copy fails, nothing is revoked and the next login tries again. |
 | Login with no cookie, or on a browser linked to another user | none | Nothing to copy; the cookie is linked to the user. |
 
 With `subjectQuery: 'property'` the list filters on `properties.subjectRef` instead of `userId`.

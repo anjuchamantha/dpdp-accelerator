@@ -119,7 +119,7 @@ function createIsClient({
     },
 
     async listCookieConsents(subjectId, serviceId) {
-      const query = new URLSearchParams({ serviceId, attributes: 'purposes,properties', limit: String(LIST_LIMIT) });
+      const query = new URLSearchParams({ serviceId, attributes: 'purposes,properties,authorizations', limit: String(LIST_LIMIT) });
       if (subjectQuery === 'property') {
         query.set('filter', `properties.consentType eq cookie and properties.subjectRef eq ${subjectId}`);
       } else {
@@ -146,6 +146,10 @@ function createIsClient({
 
     createConsent(body) {
       return call('POST', '/consents', body);
+    },
+
+    updateConsent(consentId, body) {
+      return call('PATCH', `/consents/${encodeURIComponent(consentId)}`, body);
     },
 
     async revokeConsent(consentId) {

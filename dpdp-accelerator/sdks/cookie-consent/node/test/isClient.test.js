@@ -77,7 +77,7 @@ test("lists a subject's cookie consents by userId", async () => {
   assert.equal(url.searchParams.get('relation'), 'SUBJECT');
   assert.equal(url.searchParams.get('serviceId'), 'svc');
   assert.equal(url.searchParams.get('filter'), 'properties.consentType eq cookie');
-  assert.equal(url.searchParams.get('attributes'), 'purposes,properties');
+  assert.equal(url.searchParams.get('attributes'), 'purposes,properties,authorizations');
   assert.equal(calls[1].options.headers.Authorization, 'Bearer tok-1');
 });
 
