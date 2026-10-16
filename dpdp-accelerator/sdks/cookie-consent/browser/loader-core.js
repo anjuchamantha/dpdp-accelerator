@@ -95,10 +95,18 @@
     return left.length === right.length && left.every(function (k, i) { return k === right[i]; });
   }
 
+  // An unsent decision was made on a state with this basis. Any other basis means the save went
+  // through, a later decision or withdrawal overtook it, or another account is now signed in, and
+  // sending it again would undo that.
+  function pendingApplies(pending, state) {
+    return !!pending && pending.revision === state.revision && typeof pending.basis === 'string'
+      && pending.basis === state.basis;
+  }
+
   // The browser's own consent cookie is deliberately not an input: only the server's decision or
   // the user's unsent decision may stand for consent.
   function startAction(state, pending) {
-    if (pending && pending.revision === state.revision) {
+    if (pendingApplies(pending, state)) {
       var accepted = Object.keys(pending.categories).filter(function (key) { return pending.categories[key] === true; });
       return { type: 'retryPending', accepted: accepted };
     }
@@ -170,5 +178,6 @@
     decisionFromAccepted: decisionFromAccepted,
     sameOptionalCategories: sameOptionalCategories,
     startAction: startAction,
+    pendingApplies: pendingApplies,
   };
 });

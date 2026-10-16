@@ -40,6 +40,7 @@ const TEXTS = {
 
 const STATE = {
   revision: 42,
+  basis: 'b-1',
   hasDecision: true,
   categories: { analytics: true, marketing: false },
   config: {
@@ -97,14 +98,28 @@ test('sameOptionalCategories ignores necessary and order', () => {
   assert.equal(core.sameOptionalCategories(['necessary', 'a'], ['a', 'b']), false);
 });
 
-test('startAction retries a pending decision for the current revision even when the server has one', () => {
-  const pending = { revision: 42, categories: { analytics: false, marketing: true } };
+test('startAction retries a pending decision made on the current state even when the server has one', () => {
+  const pending = { revision: 42, basis: 'b-1', categories: { analytics: false, marketing: true } };
   assert.deepEqual(core.startAction(STATE, pending), { type: 'retryPending', accepted: ['marketing'] });
 });
 
 test('startAction ignores a pending decision made for another revision', () => {
-  const pending = { revision: 41, categories: { analytics: false, marketing: true } };
+  const pending = { revision: 41, basis: 'b-1', categories: { analytics: false, marketing: true } };
   assert.deepEqual(core.startAction(STATE, pending), { type: 'applyServer', accepted: ['analytics'] });
+});
+
+test('startAction drops a pending decision once the state it was made on has changed', () => {
+  // Its save went through, a withdrawal overtook it, or another account signed in.
+  const pending = { revision: 42, basis: 'b-0', categories: { analytics: false, marketing: true } };
+  assert.deepEqual(core.startAction(STATE, pending), { type: 'applyServer', accepted: ['analytics'] });
+  assert.equal(core.pendingApplies(pending, STATE), false);
+});
+
+test('pendingApplies rejects a pending decision with no basis', () => {
+  assert.equal(core.pendingApplies({ revision: 42, categories: {} }, STATE), false);
+  assert.equal(core.pendingApplies({ revision: 42, categories: {} }, { ...STATE, basis: undefined }), false);
+  assert.equal(core.pendingApplies(null, STATE), false);
+  assert.equal(core.pendingApplies({ revision: 42, basis: 'b-1', categories: {} }, STATE), true);
 });
 
 test('startAction applies the server decision when nothing is pending', () => {

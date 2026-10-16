@@ -79,6 +79,9 @@ Optional settings: `secureCookies` (default `true`), `expiryDays` (365), `texts`
   saved for the browser only and merged at the next login (most recent choice wins).
 - A revocation in the consent portal takes effect on the next page load.
 - A choice that could not be saved is kept in the browser and sent again on the next page load; until then the browser applies it.
+  It is dropped instead if the decision shown on that page has changed (its save did go through, a
+  withdrawal or another device overtook it, or another account signed in), so it never undoes a
+  newer decision. Choices are sent one at a time, so a quick change of mind cannot arrive first.
 
 ## Calls to Identity Server
 
@@ -101,7 +104,7 @@ Per visitor, after the categories are loaded:
 | Scenario | Calls | Why |
 |---|---|---|
 | Page load, no decision yet (no `dpdp_cc` cookie) | none | There is no subject to look up. |
-| Page load, any other visitor or a logged-in user | `GET /consents?userId=<subject>&relation=SUBJECT&filter=properties.consentType eq cookie` | IS holds the decision, so a revocation in the portal, a choice on another device, an expiry or a new Purpose version reaches the page. |
+| Page load, any other visitor or a logged-in user | `GET /consents?userId=<subject>&relation=SUBJECT&filter=properties.consentType eq cookie`, one call per 100 consents (IS lists oldest first, so every page is read) | IS holds the decision, so a revocation in the portal, a choice on another device, an expiry or a new Purpose version reaches the page. |
 | First choice by a new visitor (banner) | `POST /consents` per category | One consent per category, so each can be withdrawn on its own: `ACTIVE` if accepted, `REJECTED` if declined. |
 | Any other choice, including a logged-in user's | `GET /consents?…`, then per changed category: accepting is `POST /consents`; declining an accepted category is `POST /consents/{id}/revoke`; declining an undecided one is `POST /consents` (`REJECTED`) | The read gives the current decision and the consent IDs to revoke. Unchanged categories cost nothing, and the result is not read back. |
 | Login (`linkOnLogin`) | `GET /consents?…` for the visitor and the user (in parallel); per category where the visitor's choice is newer, the same writes as a choice, made for the user (`POST /consents` with `linkedFrom`, plus a revoke when it replaces an accepted user consent); then `POST /consents/{id}/revoke` for each accepted visitor consent | IS cannot move a consent to another subject, so the choice is copied to the user, and the visitor's copies are revoked so nothing unused stays `ACTIVE`. If a copy fails, nothing is revoked and the next login tries again. |

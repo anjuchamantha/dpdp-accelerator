@@ -23,7 +23,7 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const { createRouter } = require('../src/router');
 const { seal, COOKIE_NAME } = require('../src/subjectCookie');
-const { StaleRevisionError } = require('../src/cookieConsentService');
+const { StaleRevisionError, DecisionNotSavedError } = require('../src/cookieConsentService');
 
 const SECRET = 's'.repeat(32);
 const STATE = { revision: 1, hasDecision: false, categories: {}, config: { texts: {}, categories: [] } };
@@ -33,7 +33,7 @@ async function withServer(service, run, username = null) {
   const app = express();
   app.use('/cookie-consent', createRouter({
     service, cookieSecret: SECRET, cookieOptions: { secure: false, maxAgeDays: 365 },
-    getUsername: () => username, onError: (e) => errors.push(e),
+    getUsername: typeof username === 'function' ? username : () => username, onError: (e) => errors.push(e),
   }));
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -117,6 +117,38 @@ test('POST /decision answers 502 when IS fails', async () => {
     assert.equal((await postJson(`${base}/decision`, { revision: 1, categories: {} })).status, 502);
     assert.equal(errors.length, 1);
   });
+});
+
+test('POST /decision still sets the subject cookie when a save fails part way', async () => {
+  const service = { saveDecision: async () => { throw new DecisionNotSavedError(new Error('IS down'), { v: 'v-3', u: null }); } };
+  await withServer(service, async (base, errors) => {
+    const response = await postJson(`${base}/decision`, { revision: 1, categories: { analytics: true } });
+    assert.equal(response.status, 502);
+    assert.match(response.headers.get('set-cookie'), new RegExp(`^${COOKIE_NAME}=`));
+    assert.deepEqual(errors.map((e) => e.message), ['IS down']);
+  });
+});
+
+test('awaits an async getUsername in both routes', async () => {
+  const seen = [];
+  const service = {
+    getState: async (args) => { seen.push(args.username); return STATE; },
+    saveDecision: async (args) => { seen.push(args.username); return { cookie: { v: 'v-1', u: args.username }, state: STATE }; },
+  };
+  await withServer(service, async (base) => {
+    assert.equal((await fetch(`${base}/state`)).status, 200);
+    assert.equal((await postJson(`${base}/decision`, { revision: 1, categories: {} })).status, 200);
+    assert.deepEqual(seen, ['alice', 'alice']);
+  }, async () => 'alice');
+});
+
+test('a rejected async getUsername answers 502 and reports the error', async () => {
+  const service = { getState: async () => assert.fail('must not be called'), saveDecision: async () => assert.fail('must not be called') };
+  await withServer(service, async (base, errors) => {
+    assert.equal((await fetch(`${base}/state`)).status, 502);
+    assert.equal((await postJson(`${base}/decision`, { revision: 1, categories: {} })).status, 502);
+    assert.deepEqual(errors.map((e) => e.message), ['session store down', 'session store down']);
+  }, async () => { throw new Error('session store down'); });
 });
 
 test('serves the loader and the library', async () => {

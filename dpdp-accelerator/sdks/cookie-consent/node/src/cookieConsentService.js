@@ -18,6 +18,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const { newVisitorId: defaultNewVisitorId } = require('./subjectCookie');
 const { resolveState, resolveAfter, planChanges, decisionsToLink, decisionConsentIds } = require('./consentState');
 
@@ -27,6 +28,20 @@ class StaleRevisionError extends Error {
   constructor() {
     super('The cookie categories changed since the banner was shown');
     this.name = 'StaleRevisionError';
+  }
+}
+
+/**
+ * Some writes of a decision may have succeeded, so the browser must still get the cookie naming
+ * their subject: without it a new visitor's retry starts another visitor and the consents already
+ * created are left with no browser that can change them.
+ */
+class DecisionNotSavedError extends Error {
+  constructor(cause, cookie) {
+    super(cause.message);
+    this.name = 'DecisionNotSavedError';
+    this.cause = cause;
+    this.cookie = cookie;
   }
 }
 
@@ -42,21 +57,35 @@ function bannerConfig(catalog, texts) {
   };
 }
 
+/**
+ * Changes whenever whose decision a page shows, or the decision itself, changes. The loader keeps
+ * an unsent decision only while the page's state still has the basis it was made on, so a decision
+ * whose save did go through, or that a later withdrawal or another account has overtaken, is never
+ * sent again. Keyed, so the browser cannot tell from it whose decision it is.
+ */
+function basisOf(secret, subject, state) {
+  const decided = Object.keys(state.categories).sort().map((key) => [key, state.categories[key]]);
+  return crypto.createHmac('sha256', secret)
+    .update(JSON.stringify([subject || '', state.revision, decided]))
+    .digest('base64url')
+    .slice(0, 22);
+}
+
 function createCookieConsentService({
-  isClient, catalog, serviceId, siteName, texts, language = 'en', expiryDays = 365, now = Date.now,
+  isClient, catalog, serviceId, siteName, texts, basisSecret, language = 'en', expiryDays = 365, now = Date.now,
   newVisitorId = defaultNewVisitorId, onError = () => {},
 }) {
   function listFor(subject) {
     return isClient.listCookieConsents(subject, serviceId);
   }
 
-  function withConfig(state, currentCatalog) {
-    return { ...state, config: bannerConfig(currentCatalog, texts) };
+  function present(subject, state, currentCatalog) {
+    return { ...state, basis: basisOf(basisSecret, subject, state), config: bannerConfig(currentCatalog, texts) };
   }
 
   async function stateFor(subject, currentCatalog) {
     const records = subject ? await listFor(subject) : [];
-    return withConfig(resolveState(records, currentCatalog), currentCatalog);
+    return present(subject, resolveState(records, currentCatalog), currentCatalog);
   }
 
   async function execute(subject, ops, currentCatalog, extraProperties = {}) {
@@ -104,10 +133,14 @@ function createCookieConsentService({
       }
       const subject = username || nextCookie.v;
       const records = isNewVisitor ? [] : await listFor(subject);
-      await execute(subject, planChanges(records, currentCatalog, categories), currentCatalog);
+      try {
+        await execute(subject, planChanges(records, currentCatalog, categories), currentCatalog);
+      } catch (e) {
+        throw new DecisionNotSavedError(e, nextCookie);
+      }
       // Every write succeeded (a failure throws), so the new state follows from the records read
       // above and the decision; reading it back from Identity Server would cost a call per save.
-      return { cookie: nextCookie, state: withConfig(resolveAfter(records, currentCatalog, categories), currentCatalog) };
+      return { cookie: nextCookie, state: present(subject, resolveAfter(records, currentCatalog, categories), currentCatalog) };
     },
 
     async linkOnLogin({ username, cookie }) {
@@ -135,4 +168,4 @@ function createCookieConsentService({
   };
 }
 
-module.exports = { createCookieConsentService, StaleRevisionError };
+module.exports = { createCookieConsentService, StaleRevisionError, DecisionNotSavedError };

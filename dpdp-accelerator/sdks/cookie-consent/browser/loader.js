@@ -77,16 +77,42 @@
     }
   }
 
+  // One decision is sent at a time: two saves in flight would both be planned from the same
+  // consents, and whichever finished last would win even if it was the older choice. Only the latest
+  // choice waits, since it replaces any before it.
+  var sending = false;
+  var queued = null;
+
+  function sendDecision(pending) {
+    if (sending) {
+      queued = pending;
+      return;
+    }
+    sending = true;
+    postDecision(pending).then(function () {
+      sending = false;
+      var next = queued;
+      queued = null;
+      if (next) sendDecision(next);
+    });
+  }
+
   function postDecision(pending) {
     return fetch(base + '/decision', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pending),
+      body: JSON.stringify({ revision: pending.revision, categories: pending.categories }),
     }).then(function (response) {
       if (response.ok) {
-        writePending(null);
-      } else if (response.status === 409) {
+        return response.json().then(function (state) {
+          serverState = state;
+          // The waiting choice now follows this saved one, so it is kept against the new basis.
+          if (queued) queued.basis = state.basis;
+          writePending(queued);
+        });
+      }
+      if (response.status === 409) {
         // The categories changed after this page loaded; reload to show the new banner.
         writePending(null);
         window.location.reload();
@@ -140,10 +166,11 @@
     if (applyingServerState) return;
     var pending = {
       revision: serverState.revision,
+      basis: serverState.basis,
       categories: core.decisionFromAccepted(CookieConsent.getUserPreferences().acceptedCategories, serverState),
     };
     writePending(pending);
-    postDecision(pending);
+    sendDecision(pending);
   }
 
   function applyAccepted(accepted) {
@@ -180,7 +207,7 @@
   function start(state) {
     serverState = state;
     var pending = readPending();
-    if (pending && pending.revision !== state.revision) {
+    if (pending && !core.pendingApplies(pending, state)) {
       writePending(null);
       pending = null;
     }
@@ -206,7 +233,7 @@
       if (!local || !core.sameOptionalCategories(local, action.accepted)) applyAccepted(action.accepted);
       CookieConsent.hide();
       addFloatingButton(state.config.texts.preferencesTitle);
-      if (action.type === 'retryPending') postDecision(pending);
+      if (action.type === 'retryPending') sendDecision(pending);
     });
   }
 

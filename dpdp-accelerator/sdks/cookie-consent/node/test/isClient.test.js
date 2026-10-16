@@ -89,6 +89,34 @@ test('lists by the subjectRef property when configured to', async () => {
   assert.equal(url.searchParams.get('filter'), 'properties.consentType eq cookie and properties.subjectRef eq v-1');
 });
 
+test('follows the next cursor until the last page, keeping the query', async () => {
+  const pages = {
+    '': { Consents: [{ id: 'c1' }], links: [{ rel: 'next', href: 'https://is.internal:9443/api/identity/consent-mgt/v2.0/consents?limit=100&after=MQ==' }] },
+    'MQ==': { Consents: [{ id: 'c2' }], links: [{ rel: 'previous', href: 'x' }, { rel: 'next', href: '/consents?after=Mg==' }] },
+    'Mg==': { Consents: [{ id: 'c3' }], links: [{ rel: 'previous', href: 'x' }] },
+  };
+  const { c, calls } = client(async (url) => response(200, pages[new URL(url).searchParams.get('after') || '']));
+  assert.deepEqual(await c.listCookieConsents('v-1', 'svc'), [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }]);
+  const urls = calls.slice(1).map((x) => new URL(x.url));
+  assert.equal(urls.length, 3);
+  for (const url of urls) {
+    assert.equal(url.origin, 'https://is.test');
+    assert.equal(url.searchParams.get('userId'), 'v-1');
+    assert.equal(url.searchParams.get('filter'), 'properties.consentType eq cookie');
+  }
+  assert.deepEqual(urls.map((u) => u.searchParams.get('after')), [null, 'MQ==', 'Mg==']);
+});
+
+test('stops paging on an empty page or a repeated cursor', async () => {
+  const looping = { Consents: [{ id: 'c1' }], links: [{ rel: 'next', href: '/consents?after=MQ==' }] };
+  const { c, calls } = client(async () => response(200, looping));
+  assert.deepEqual(await c.listCookieConsents('v-1', 'svc'), [{ id: 'c1' }, { id: 'c1' }]);
+  assert.equal(calls.length, 3);
+  const empty = client(async () => response(200, { Consents: [], links: [{ rel: 'next', href: '/consents?after=MQ==' }] }));
+  assert.deepEqual(await empty.c.listCookieConsents('v-1', 'svc'), []);
+  assert.equal(empty.calls.length, 2);
+});
+
 test('treats a list response without Consents as empty', async () => {
   const { c } = client(async () => response(200, {}));
   assert.deepEqual(await c.listCookieConsents('v-1', 'svc'), []);

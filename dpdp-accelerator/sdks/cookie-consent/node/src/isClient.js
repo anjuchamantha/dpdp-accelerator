@@ -127,8 +127,21 @@ function createIsClient({
         query.set('relation', 'SUBJECT');
         query.set('filter', 'properties.consentType eq cookie');
       }
-      const data = await call('GET', `/consents?${query.toString()}`);
-      return data && Array.isArray(data.Consents) ? data.Consents : [];
+      // IS lists oldest first, so the latest decisions are on the last page. Only the cursor is
+      // taken from the next link: its host is IS's own hostname, which the SDK may not reach.
+      const consents = [];
+      const seen = new Set();
+      for (;;) {
+        const data = await call('GET', `/consents?${query.toString()}`);
+        const page = data && Array.isArray(data.Consents) ? data.Consents : [];
+        if (page.length === 0) return consents;
+        consents.push(...page);
+        const next = data && Array.isArray(data.links) ? data.links.find((l) => l && l.rel === 'next') : null;
+        const after = next && typeof next.href === 'string' ? new URL(next.href, 'https://is.invalid').searchParams.get('after') : null;
+        if (!after || seen.has(after)) return consents;
+        seen.add(after);
+        query.set('after', after);
+      }
     },
 
     createConsent(body) {

@@ -45,6 +45,14 @@ test('returns a router', () => {
   assert.equal(typeof createCookieConsent(options()).router(), 'function');
 });
 
+test('calls Identity Server without the trailing slashes of isBaseUrl', async () => {
+  const urls = [];
+  const fetch = async (url) => { urls.push(url); return { ok: false, status: 503, json: async () => ({}), text: async () => '' }; };
+  const cc = createCookieConsent(options({ isBaseUrl: 'https://is.test///', fetch, onError: () => {} }));
+  await cc.linkOnLogin({ headers: { cookie: `${COOKIE_NAME}=${seal(SECRET, { v: 'v-1', u: null })}` } }, { cookie: () => {} }, 'alice');
+  assert.equal(urls[0], 'https://is.test/oauth2/token');
+});
+
 test('linkOnLogin never throws and reports IS failures', async () => {
   const errors = [];
   const cc = createCookieConsent(options({ fetch: async () => { throw new Error('IS down'); }, onError: (e) => errors.push(e) }));

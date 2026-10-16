@@ -50,12 +50,18 @@ function validate(options) {
   }
 }
 
+function withoutTrailingSlashes(url) {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === '/') end -= 1;
+  return url.slice(0, end);
+}
+
 function createCookieConsent(options) {
   validate(options);
   const onError = options.onError || ((e) => console.error(`[cookie-consent] ${e.message}`));
   const cookieOptions = { secure: options.secureCookies !== false, maxAgeDays: options.expiryDays || 365 };
   const isClient = createIsClient({
-    baseUrl: options.isBaseUrl.replace(/\/+$/, ''),
+    baseUrl: withoutTrailingSlashes(options.isBaseUrl),
     clientId: options.clientId,
     clientSecret: options.clientSecret,
     fetch: options.fetch,
@@ -68,6 +74,7 @@ function createCookieConsent(options) {
     serviceId: options.serviceId,
     siteName: options.siteName,
     texts: { ...DEFAULT_TEXTS, ...(options.texts || {}) },
+    basisSecret: options.cookieSecret,
     expiryDays: options.expiryDays,
     onError,
   });

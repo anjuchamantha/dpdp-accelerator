@@ -20,7 +20,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createCookieConsentService, StaleRevisionError } = require('../src/cookieConsentService');
+const { createCookieConsentService, StaleRevisionError, DecisionNotSavedError } = require('../src/cookieConsentService');
 
 const VERSIONS = { 'p-a': 'pv-a1', 'p-m': 'pv-m1' };
 const CATALOG = {
@@ -61,7 +61,7 @@ function setup() {
   let visitors = 0;
   const service = createCookieConsentService({
     isClient: is, catalog: { get: async () => CATALOG }, serviceId: 'svc', siteName: 'Demo Insurance',
-    texts: { bannerTitle: 'We use cookies' }, now: () => 0, newVisitorId: () => `v-${++visitors}`,
+    texts: { bannerTitle: 'We use cookies' }, basisSecret: 'b'.repeat(32), now: () => 0, newVisitorId: () => `v-${++visitors}`,
     onError: (e) => errors.push(e),
   });
   return { is, service, errors };
@@ -109,6 +109,24 @@ test('rejects a decision made against an old revision without writing anything',
   assert.equal(is.records.length, 0);
 });
 
+test('a first decision that fails part way still names its visitor, and the retry completes it', async () => {
+  const { is, service } = setup();
+  const create = is.createConsent;
+  is.createConsent = async (body) => { if (body.purposes[0].id === 'p-m') throw new Error('IS down'); return create(body); };
+  let failure;
+  await assert.rejects(
+    service.saveDecision({ username: null, cookie: null, categories: { analytics: true, marketing: true }, revision: 42 }),
+    (e) => { failure = e; return e instanceof DecisionNotSavedError && e.cause.message === 'IS down'; },
+  );
+  assert.deepEqual(failure.cookie, { v: 'v-1', u: null });
+  assert.deepEqual(states(is, 'v-1'), [['p-a', 'ACTIVE']]);
+
+  is.createConsent = create;
+  await service.saveDecision({ username: null, cookie: failure.cookie, categories: { analytics: true, marketing: true }, revision: 42 });
+  assert.deepEqual(states(is, 'v-1'), [['p-a', 'ACTIVE'], ['p-m', 'ACTIVE']]);
+  assert.equal(is.records.filter((r) => r.subjectId !== 'v-1').length, 0);
+});
+
 test('saving the same decision twice creates nothing new', async () => {
   const { is, service } = setup();
   const first = await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
@@ -145,6 +163,23 @@ test('the returned state matches what a fresh read of Identity Server gives', as
   const first = await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
   const second = await service.saveDecision({ username: null, cookie: first.cookie, categories: { marketing: true }, revision: 42 });
   assert.deepEqual(second.state, await service.getState({ username: null, cookie: second.cookie }));
+});
+
+test('the basis changes with the decision or the subject, and nothing else', async () => {
+  const { is, service } = setup();
+  const empty = await service.getState({ username: null, cookie: null });
+  assert.equal(typeof empty.basis, 'string');
+  const saved = await service.saveDecision({ username: null, cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
+  assert.notEqual(saved.state.basis, empty.basis);
+  assert.equal((await service.getState({ username: null, cookie: saved.cookie })).basis, saved.state.basis);
+
+  is.records.find((r) => r.purposes[0].id === 'p-a').state = 'REVOKED';
+  assert.notEqual((await service.getState({ username: null, cookie: saved.cookie })).basis, saved.state.basis);
+
+  const bob = await service.saveDecision({ username: 'bob', cookie: null, categories: ACCEPT_ANALYTICS, revision: 42 });
+  assert.deepEqual(bob.state.categories, saved.state.categories);
+  assert.notEqual(bob.state.basis, saved.state.basis);
+  assert.ok(!bob.state.basis.includes('bob'));
 });
 
 test('withdrawing analytics revokes its consent', async () => {
@@ -239,6 +274,19 @@ test('linkOnLogin still links the browser when a visitor revoke fails', async ()
   assert.deepEqual(linked, { v: 'v-1', u: 'alice' });
   assert.deepEqual(states(is, 'v-1'), [['p-a', 'ACTIVE'], ['p-m', 'REVOKED']]);
   assert.deepEqual(errors.map((e) => e.message), ['revoke failed']);
+});
+
+test('a visitor revoke that failed at login is retried at the same user\'s next login', async () => {
+  const { is, service } = setup();
+  const { cookie } = await service.saveDecision({ username: null, cookie: null, categories: { analytics: true, marketing: true }, revision: 42 });
+  const revoke = is.revokeConsent;
+  is.revokeConsent = async (id) => { if (id === 'c1') throw new Error('revoke failed'); return revoke(id); };
+  const linked = await service.linkOnLogin({ username: 'alice', cookie });
+  is.revokeConsent = revoke;
+  const userRecords = states(is, 'alice').length;
+  assert.deepEqual(await service.linkOnLogin({ username: 'alice', cookie: linked }), { v: 'v-1', u: 'alice' });
+  assert.deepEqual(states(is, 'v-1'), [['p-a', 'REVOKED'], ['p-m', 'REVOKED']]);
+  assert.equal(states(is, 'alice').length, userRecords);
 });
 
 test("linkOnLogin keeps the user's newer decision", async () => {

@@ -22,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { readSubjectCookie, writeSubjectCookie } = require('./subjectCookie');
-const { StaleRevisionError } = require('./cookieConsentService');
+const { StaleRevisionError, DecisionNotSavedError } = require('./cookieConsentService');
 
 // The loader is shared by every cookie consent SDK, so it lives beside this one in the repository;
 // prepack copies it into the package, where it is found first.
@@ -52,7 +52,7 @@ function createRouter({ service, cookieSecret, cookieOptions, getUsername, onErr
   router.get('/state', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
-      res.json(await service.getState({ username: getUsername(req), cookie: readSubjectCookie(req, cookieSecret) }));
+      res.json(await service.getState({ username: await getUsername(req), cookie: readSubjectCookie(req, cookieSecret) }));
     } catch (e) {
       onError(e);
       res.status(502).json({ error: 'Cookie consent state is unavailable' });
@@ -67,7 +67,7 @@ function createRouter({ service, cookieSecret, cookieOptions, getUsername, onErr
     }
     try {
       const { cookie, state } = await service.saveDecision({
-        username: getUsername(req),
+        username: await getUsername(req),
         cookie: readSubjectCookie(req, cookieSecret),
         categories: req.body.categories,
         revision: req.body.revision,
@@ -79,7 +79,12 @@ function createRouter({ service, cookieSecret, cookieOptions, getUsername, onErr
         res.status(409).json({ error: e.message });
         return;
       }
-      onError(e);
+      if (e instanceof DecisionNotSavedError) {
+        writeSubjectCookie(res, cookieSecret, e.cookie, cookieOptions);
+        onError(e.cause);
+      } else {
+        onError(e);
+      }
       res.status(502).json({ error: 'Cookie consent could not be saved' });
     }
   });
@@ -89,8 +94,9 @@ function createRouter({ service, cookieSecret, cookieOptions, getUsername, onErr
   });
 
   for (const file of LIBRARY_FILES) {
+    const body = fs.readFileSync(path.join(LIBRARY_DIST, file));
     router.get(`/vendor/${file}`, (req, res) => {
-      res.sendFile(path.join(LIBRARY_DIST, file), { maxAge: '1d' });
+      res.type(path.extname(file)).set('Cache-Control', 'public, max-age=86400').send(body);
     });
   }
 

@@ -111,7 +111,19 @@ paths:
         '413':
           description: The body is larger than 4 KB.
         '502':
-          $ref: '#/components/responses/Unavailable'
+          description: >-
+            Identity Server failed while saving. Some categories may already be saved, so the
+            dpdp_cc cookie is still set when the SDK got that far: the browser's retry then
+            continues for the same visitor instead of starting a new one.
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SubjectCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDTO'
+              example:
+                error: Cookie consent could not be saved
   /loader.js:
     get:
       tags: [assets]
@@ -186,6 +198,7 @@ components:
           example:
             revision: 1857038833
             hasDecision: true
+            basis: 3q2-7wEXAMPLEbasis_8fQ
             categories:
               analytics: true
               marketing: false
@@ -235,10 +248,18 @@ components:
   schemas:
     StateDTO:
       type: object
-      required: [revision, hasDecision, categories, config]
+      required: [revision, basis, hasDecision, categories, config]
       properties:
         revision:
           $ref: '#/components/schemas/Revision'
+        basis:
+          type: string
+          description: >-
+            Opaque. Changes whenever the subject or their decision changes, and reveals neither.
+            The loader keeps an unsent decision together with the basis of the state it was made
+            on, and sends it again on a later page load only while that page's state has the same
+            basis; otherwise its save went through or a newer decision, a withdrawal or another
+            account overtook it.
         hasDecision:
           type: boolean
           description: True only when every configured category has a choice.
